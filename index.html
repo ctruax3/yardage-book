@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Crown Yardage Book</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* Field-book on fairway paper: pale sage paper, deep pine ink, pin-flag red for the one thing to look at, sand for hazards. */
+  --paper:#eef1ea;
+  --card:#f9faf6;
+  --ink:#14241d;
+  --muted:#5b6b62;
+  --rule:#d3dacf;
+  --pine:#1f4a37;
+  --flag:#d23b2a;
+  --sand:#c9a45c;
+  --water:#3a7ca5;
+  --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--paper);color:var(--ink);font:16px/1.45 var(--body);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--flag);outline-offset:2px}
+
+.app{max-width:1280px;margin:0 auto;padding:12px 16px 28px;display:grid;gap:12px}
+header.top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.brand h1{font:700 clamp(21px,5.6vw,26px)/1 var(--display);letter-spacing:.02em;margin:0;text-transform:uppercase}
+.brand p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.tees{display:flex;gap:6px;flex-wrap:wrap}
+.tee{border:1px solid var(--rule);background:var(--card);border-radius:999px;padding:5px 11px 5px 8px;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;font-weight:500}
+.tee i{width:12px;height:12px;border-radius:50%;border:1px solid rgba(0,0,0,.35);display:block}
+.tee[aria-pressed="true"]{background:var(--ink);color:var(--card);border-color:var(--ink)}
+
+nav.holes{display:flex;gap:6px;overflow-x:auto;padding:2px 0 4px;scrollbar-width:none}
+nav.holes::-webkit-scrollbar{display:none}
+nav.holes button{flex:0 0 auto;min-width:40px;height:40px;border-radius:10px;border:1px solid var(--rule);background:var(--card);font:600 18px/1 var(--display);cursor:pointer}
+nav.holes button.card{padding:0 12px;font-size:15px;letter-spacing:.04em;text-transform:uppercase}
+nav.holes button[aria-current="true"]{background:var(--pine);color:#fff;border-color:var(--pine)}
+
+.main{display:grid;gap:12px}
+@media (min-width:900px){.main{grid-template-columns:minmax(0,1.45fr) minmax(320px,1fr);align-items:start}}
+
+.stage{position:relative;border-radius:14px;overflow:hidden;background:#cfd8cf;aspect-ratio:4/5;max-height:72svh;width:100%;touch-action:none}
+@media (min-width:900px){.stage{aspect-ratio:auto;height:min(78svh,760px);max-height:none}}
+.stage canvas{display:block;width:100%;height:100%}
+.stage .layer{position:absolute;inset:0}
+.stage .layer[hidden]{display:none}
+.hud{position:absolute;left:10px;right:10px;top:10px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;pointer-events:none}
+.hud>*{pointer-events:auto}
+.seg{display:flex;background:rgba(20,36,29,.78);backdrop-filter:blur(6px);border-radius:10px;padding:3px;gap:2px}
+.seg button{border:0;background:transparent;color:#e9efe9;padding:6px 10px;border-radius:7px;cursor:pointer;font:600 14px/1 var(--display);letter-spacing:.05em;text-transform:uppercase}
+.seg button[aria-pressed="true"]{background:#f9faf6;color:var(--ink)}
+.tools{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.chip{background:rgba(20,36,29,.78);backdrop-filter:blur(6px);color:#f4f6f2;border:0;border-radius:10px;padding:7px 10px;font:600 14px/1 var(--display);letter-spacing:.04em;text-transform:uppercase;cursor:pointer}
+.tapinfo{position:absolute;left:10px;bottom:10px;right:10px;display:flex;justify-content:center;pointer-events:none}
+.tapinfo div{white-space:nowrap;background:rgba(249,250,246,.95);color:var(--ink);border-radius:12px;padding:8px 12px;font-size:14px;box-shadow:0 4px 18px rgba(0,0,0,.18);display:flex;gap:14px;align-items:baseline;font-variant-numeric:tabular-nums}
+.tapinfo b{font:700 22px/1 var(--display);white-space:nowrap}.tapinfo b small{font-size:13px}
+.tapinfo span{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+.note3d{position:absolute;inset:auto 0 0 0;padding:10px;text-align:center;color:#fff;font-size:13px;text-shadow:0 1px 3px rgba(0,0,0,.6);pointer-events:none}
+
+.panel{display:grid;gap:12px}
+.box{background:var(--card);border:1px solid var(--rule);border-radius:14px;padding:14px}
+.holehead{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;align-items:center}
+.num{font:700 64px/.85 var(--display);color:var(--pine);grid-row:span 2}
+.holehead .meta{font:600 15px/1.2 var(--display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.holehead .yds{font:700 34px/1 var(--display);font-variant-numeric:tabular-nums}
+.holehead .yds small{font-size:16px;color:var(--muted);font-weight:600;margin-left:4px}
+.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.fact{border-top:2px solid var(--rule);padding-top:6px}
+.fact .k{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.fact .v{font:700 24px/1.1 var(--display);font-variant-numeric:tabular-nums}
+.fact .v.up{color:var(--flag)} .fact .v.down{color:var(--water)}
+
+h2{font:700 15px/1 var(--display);letter-spacing:.09em;text-transform:uppercase;margin:0 0 10px;color:var(--muted)}
+.green{display:grid;grid-template-columns:120px 1fr;gap:14px;align-items:center}
+.green svg{width:120px;height:120px}
+.fcb{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-variant-numeric:tabular-nums;align-items:baseline}
+.fcb dt{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.fcb dd{margin:0;font:700 26px/1.05 var(--display)}
+.fcb dd.c{color:var(--flag);font-size:32px}
+.fcb .sz{grid-column:1/-1;font-size:13px;color:var(--muted);margin-top:4px}
+
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.haz td,.haz th{padding:7px 4px;border-bottom:1px solid var(--rule);text-align:right;font-size:15px}
+.haz th{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}
+.haz td:first-child,.haz th:first-child{text-align:left}
+.haz .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:7px;vertical-align:-1px}
+.haz .side{display:inline-block;min-width:22px;text-align:center;font:600 13px/18px var(--display);border-radius:5px;background:var(--paper);border:1px solid var(--rule)}
+.haz .big{font:700 19px/1 var(--display)}
+.empty{color:var(--muted);font-size:14px}
+
+.profile svg{width:100%;height:auto;display:block}
+.small{font-size:12.5px;color:var(--muted);line-height:1.45}
+.small a{color:var(--pine)}
+
+.cardview{overflow-x:auto}
+.sc{min-width:640px}
+.sc th,.sc td{padding:6px 5px;text-align:center;border-bottom:1px solid var(--rule);font-size:14px}
+.sc th{font:600 12px/1.1 var(--body);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.sc td:first-child,.sc th:first-child{text-align:left;white-space:nowrap}
+.sc tr.sub td{font-weight:600;background:var(--paper)}
+.sc tbody tr{cursor:pointer}
+.sc tbody tr:hover td{background:#eaf0e6}
+.sc .t{display:inline-block;width:9px;height:9px;border-radius:50%;border:1px solid rgba(0,0,0,.35);margin-right:5px}
+.sc tr.sel td.tc{color:var(--flag);font-weight:700}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <h1>The Crown · Yardage Book</h1>
+      <p>Traverse City, Michigan · Par 72 · built from public GIS data</p>
+    </div>
+    <div class="tees" id="tees" role="group" aria-label="Tee"></div>
+  </header>
+
+  <nav class="holes" id="holes" aria-label="Holes"></nav>
+
+  <section class="main" id="holeView">
+    <div class="stage" id="stage">
+      <div class="layer" id="l3d"><canvas id="c3d"></canvas></div>
+      <div class="layer" id="l2d" hidden><canvas id="c2d"></canvas></div>
+      <div class="hud">
+        <div class="seg" role="group" aria-label="View">
+          <button id="v3d" aria-pressed="true">3D</button>
+          <button id="v2d" aria-pressed="false">Hole map</button>
+        </div>
+        <div class="tools" id="tools3d">
+          <button class="chip" id="fly">Fly the hole</button>
+          <button class="chip" id="greenv">Green view</button>
+          <button class="chip" id="exag" title="Vertical exaggeration">Relief 1×</button>
+          <button class="chip" id="reset">Tee view</button>
+        </div>
+      </div>
+      <div class="tapinfo" id="tapinfo"><div><span>Tap the course for distances</span></div></div>
+    </div>
+
+    <div class="panel">
+      <div class="box">
+        <div class="holehead">
+          <div class="num" id="hNum">1</div>
+          <div class="meta" id="hMeta">Par 5 · Handicap 7</div>
+          <div class="yds" id="hYds">510<small>yds</small></div>
+        </div>
+        <div class="facts">
+          <div class="fact"><div class="k">Elevation</div><div class="v" id="fElev">+11 ft</div></div>
+          <div class="fact"><div class="k">Plays like</div><div class="v" id="fPlays">514</div></div>
+          <div class="fact"><div class="k">Green depth</div><div class="v" id="fDepth">31 yd</div></div>
+        </div>
+      </div>
+
+      <div class="box">
+        <h2>Green · from the tee</h2>
+        <div class="green">
+          <svg id="gSvg" viewBox="0 0 120 120" aria-label="Green outline"></svg>
+          <dl class="fcb" id="gFcb"></dl>
+        </div>
+      </div>
+
+      <div class="box">
+        <h2>Hazards · carry from your tee</h2>
+        <table class="haz"><thead><tr><th>Hazard</th><th>Side</th><th>Reach</th><th>Carry</th><th>To green</th></tr></thead><tbody id="hazBody"></tbody></table>
+      </div>
+
+      <div class="box profile">
+        <h2>Elevation · tee to green</h2>
+        <svg id="prof" viewBox="0 0 360 130" aria-label="Elevation profile"></svg>
+      </div>
+    </div>
+  </section>
+
+  <section class="box cardview" id="cardView" hidden>
+    <h2>Scorecard</h2>
+    <table class="sc" id="sc"></table>
+    <p class="small">Tap a hole to open it. Ratings / slope: Black 72.1 / 137 · Blue 70.0 / 128 · Blue/White 68.3 / 126 · White 66.6 / 119.</p>
+  </section>
+
+  <footer class="small">
+    Distances come from public GIS data and are estimates, so check them against the sprinkler heads on the course. Hazard and green distances are measured along the hole's center line from the back tee and shifted for your tee. Plays-like uses about 1 yard per 3 ft of elevation change. Trees and buildings are as of the April 2015 LiDAR flight.
+    Sources: course features © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> (ODbL) · aerial imagery <a href="https://www.usgs.gov/programs/national-geospatial-program/national-map">USGS National Map</a> · 3D trees, buildings and 1 m ground from the 2015 FEMA/NOAA Michigan LiDAR (Grand Traverse County) · 1 m elevation from USGS 3DEP · scorecard yardages via <a href="https://www.golfpass.com/courses/7993-crown-golf-club/scorecard-and-layout">GolfPass</a>.
+  </footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/utils/BufferGeometryUtils.js"></script>
+<script>
+(async function(){
+const YD=1.0936133, FT=3.28084;
+const TEES=[{k:'Black',c:'#1b1b1b'},{k:'Blue',c:'#2f5fb3'},{k:'Blue/White',c:'linear-gradient(90deg,#2f5fb3 50%,#fff 50%)'},{k:'White',c:'#ffffff'}];
+const $=id=>document.getElementById(id);
+const store={get(k,d){try{return localStorage.getItem(k)??d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+
+const [course, tmeta] = await Promise.all([
+  fetch('course.json').then(r=>r.json()),
+  fetch('terrain.json').then(r=>r.json())
+]);
+const tbuf=Uint8Array.from(atob(tmeta.b64),c=>c.charCodeAt(0)).buffer;
+const H=course.holes;
+const Q=new Uint16Array(tbuf);
+const aerial=new Image(); aerial.src='ground.jpg';
+const objectsP=fetch('objects.json').then(r=>r.json());
+const aerialReady=new Promise(r=>{aerial.onload=r;aerial.onerror=r});
+
+let tee=store.get('crown-tee','Blue'); if(!TEES.some(t=>t.k===tee)) tee='Blue';
+let cur=1, view='3d';
+
+/* ---------- terrain sampling (metres, local east/north) ---------- */
+const {E0,E1,N0,N1,step,nx,ny,scale}=tmeta;
+function hAt(e,n){
+  const fx=(e-E0)/step, fy=(N1-n)/step;
+  const x=Math.max(0,Math.min(nx-1.001,fx)), y=Math.max(0,Math.min(ny-1.001,fy));
+  const x0=Math.floor(x), y0=Math.floor(y), tx=x-x0, ty=y-y0;
+  const i=y0*nx+x0;
+  const a=Q[i], b=Q[i+1], c=Q[i+nx], d=Q[i+nx+1];
+  return ((a*(1-tx)+b*tx)*(1-ty)+(c*(1-tx)+d*tx)*ty)*scale;
+}
+
+/* ---------- geometry helpers ---------- */
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1]], len=v=>Math.hypot(v[0],v[1]);
+function holeGeom(h){
+  const L=h.line, tee=L[0], gc=h.green.c;
+  const pts=L.slice(0,-1).concat([gc]);
+  return {pts, tee, gc};
+}
+function pointAlong(pts, d){
+  for(let i=0;i<pts.length-1;i++){
+    const s=len(sub(pts[i+1],pts[i]));
+    if(d<=s){const t=d/s;return [pts[i][0]+(pts[i+1][0]-pts[i][0])*t, pts[i][1]+(pts[i+1][1]-pts[i][1])*t]}
+    d-=s;
+  }
+  return pts[pts.length-1];
+}
+function polyLen(pts){let s=0;for(let i=0;i<pts.length-1;i++)s+=len(sub(pts[i+1],pts[i]));return s}
+const shift=h=>h.yards.Black-h.yards[tee];
+
+/* ---------- UI: tees, holes ---------- */
+function renderTees(){
+  $('tees').innerHTML=TEES.map(t=>`<button class="tee" data-t="${t.k}" aria-pressed="${t.k===tee}"><i style="background:${t.c}"></i>${t.k}</button>`).join('');
+  $('tees').querySelectorAll('button').forEach(b=>b.onclick=()=>{tee=b.dataset.t;store.set('crown-tee',tee);renderTees();renderPanel();renderCard();if(view==='2d')draw2d()});
+}
+$('holes').innerHTML=H.map(h=>`<button data-h="${h.n}" aria-label="Hole ${h.n}">${h.n}</button>`).join('')+`<button class="card" data-h="card">Card</button>`;
+$('holes').querySelectorAll('button').forEach(b=>b.onclick=()=>{location.hash=b.dataset.h==='card'?'card':'hole-'+b.dataset.h});
+
+/* ---------- panel ---------- */
+function renderPanel(){
+  const h=H[cur-1], sh=shift(h), yds=h.yards[tee];
+  $('hNum').textContent=h.n;
+  $('hMeta').textContent=`Par ${h.par} · Handicap ${h.hcp}`;
+  $('hYds').innerHTML=`${yds}<small>yds · ${tee}</small>`;
+  const d=h.elev_ft.diff;
+  $('fElev').textContent=(d>0?'+':d<0?'−':'±')+Math.abs(d)+' ft';
+  $('fElev').className='v '+(d>=6?'up':d<=-6?'down':'');
+  $('fPlays').textContent=Math.round(yds+d/3);
+  $('fDepth').textContent=h.green.depth+' yd';
+  const g=h.green, off=yds-g.center;
+  $('gFcb').innerHTML=`<dt>Back</dt><dd>${g.back+off}</dd><dt>Center</dt><dd class="c">${yds}</dd><dt>Front</dt><dd>${g.front+off}</dd><p class="sz">${g.depth} yd deep · ${g.width} yd wide${g.fall?' · arrow shows which way it falls':''}</p>`;
+  drawGreenSvg(h);
+  const rows=h.hazards.filter(z=>z.carry-sh>20).map(z=>{
+    const reach=Math.max(0,z.front-sh), carry=z.carry-sh, tog=g.center-z.carry;
+    const col=z.kind==='water'?'var(--water)':'var(--sand)';
+    const side={L:'L',R:'R',C:'C'}[z.side];
+    return `<tr><td><span class="dot" style="background:${col}"></span>${z.kind==='water'?'Water':(z.ng?'Greenside bunker':'Bunker')}</td><td><span class="side">${side}</span></td><td>${reach}</td><td class="big">${carry}</td><td>${tog>0?tog:'—'}</td></tr>`;
+  });
+  $('hazBody').innerHTML=rows.length?rows.join(''):`<tr><td colspan="5" class="empty">No mapped bunkers or water along this hole.</td></tr>`;
+  drawProfile(h);
+}
+function drawGreenSvg(h){
+  const {pts,gc}=holeGeom(h);
+  const prev=pts[pts.length-2]; const dv=sub(gc,prev); const ang=Math.atan2(dv[0],dv[1]); // bearing
+  const ca=Math.cos(ang), sa=Math.sin(ang);
+  const P=h.green.poly.map(p=>{const x=p[0]-gc[0], y=p[1]-gc[1]; return [x*ca-y*sa, x*sa+y*ca]}); // rotate so play direction is up
+  let m=0;P.forEach(p=>m=Math.max(m,Math.abs(p[0]),Math.abs(p[1])));
+  const s=50/m;
+  const d=P.map((p,i)=>(i?'L':'M')+(60+p[0]*s).toFixed(1)+' '+(60-p[1]*s).toFixed(1)).join(' ')+'Z';
+  const r10=10/YD*s;
+  let arrow='';
+  if(h.green.fall){ const f=h.green.fall; const fx=f[0]*ca-f[1]*sa, fy=f[0]*sa+f[1]*ca; const L=Math.hypot(fx,fy);
+    if(L>0.004){ const ux=fx/L, uy=fy/L; const x1=60-ux*22, y1=60+uy*22, x2=60+ux*22, y2=60-uy*22;
+      arrow=`<defs><marker id="ah" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#14241d"/></marker></defs><line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#14241d" stroke-width="2" marker-end="url(#ah)" opacity=".8"/>`; } }
+  $('gSvg').innerHTML=`<path d="${d}" fill="#8fcf8a" stroke="#1f4a37" stroke-width="1.5"/>
+   <line x1="60" y1="116" x2="60" y2="4" stroke="#1f4a37" stroke-width=".8" stroke-dasharray="3 3" opacity=".6"/>
+   ${arrow}<circle cx="60" cy="60" r="3.2" fill="#d23b2a"/>
+   <text x="112" y="${60-r10}" font-size="9" text-anchor="end" fill="#5b6b62">10 yd</text>
+   <line x1="114" y1="60" x2="114" y2="${60-r10}" stroke="#5b6b62" stroke-width="1"/>`;
+}
+function drawProfile(h){
+  const p=h.profile, sh=shift(h);
+  const xs=p.map(q=>q[0]), ys=p.map(q=>q[1]);
+  const x0=0,x1=Math.max(...xs), lo=Math.min(...ys), hi=Math.max(...ys);
+  const pad=Math.max(8,(hi-lo)*0.15), y0=Math.floor((lo-pad)/10)*10, y1=Math.ceil((hi+pad)/10)*10;
+  const W=360,Hh=130,l=34,r=8,t=10,b=22;
+  const X=v=>l+(v-x0)/(x1-x0)*(W-l-r), Y=v=>t+(1-(v-y0)/(y1-y0))*(Hh-t-b);
+  const line=p.map((q,i)=>(i?'L':'M')+X(q[0]).toFixed(1)+' '+Y(q[1]).toFixed(1)).join(' ');
+  const area=line+` L${X(x1)} ${Hh-b} L${X(x0)} ${Hh-b}Z`;
+  let grid='';
+  const ystep=(y1-y0)>60?20:10;
+  for(let v=y0;v<=y1;v+=ystep) grid+=`<line x1="${l}" x2="${W-r}" y1="${Y(v)}" y2="${Y(v)}" stroke="#d3dacf"/><text x="${l-5}" y="${Y(v)+3.5}" font-size="10" text-anchor="end" fill="#5b6b62">${v}</text>`;
+  for(let v=0;v<=x1;v+=100) grid+=`<text x="${X(v)}" y="${Hh-6}" font-size="10" text-anchor="middle" fill="#5b6b62">${v}</text>`;
+  const teeX=X(Math.min(sh,x1));
+  $('prof').innerHTML=`${grid}<path d="${area}" fill="#1f4a37" opacity=".12"/><path d="${line}" fill="none" stroke="#1f4a37" stroke-width="2"/>
+    ${sh>0?`<line x1="${teeX}" x2="${teeX}" y1="${t}" y2="${Hh-b}" stroke="#5b6b62" stroke-dasharray="3 3"/><text x="${teeX+4}" y="${t+9}" font-size="10" fill="#5b6b62">${tee} tee</text>`:''}
+    <circle cx="${X(p[p.length-1][0])}" cy="${Y(p[p.length-1][1])}" r="4" fill="#d23b2a"/>
+    <text x="${W-r}" y="${Hh-b-6}" font-size="10" text-anchor="end" fill="#5b6b62">yds from back tee · ft above sea level</text>`;
+}
+
+/* ---------- scorecard ---------- */
+function renderCard(){
+  const sum=(k,a,b)=>H.slice(a,b).reduce((s,h)=>s+(k==='par'?h.par:h.yards[k]),0);
+  const head=`<thead><tr><th>Hole</th><th>Par</th><th>Hcp</th>${TEES.map(t=>`<th><span class="t" style="background:${t.c}"></span>${t.k}</th>`).join('')}<th>Elev</th></tr></thead>`;
+  const row=h=>`<tr data-h="${h.n}" class="${''}"><td><b>${h.n}</b></td><td>${h.par}</td><td>${h.hcp}</td>${TEES.map(t=>`<td class="${t.k===tee?'tc':''}">${h.yards[t.k]}</td>`).join('')}<td>${h.elev_ft.diff>0?'+':''}${h.elev_ft.diff}</td></tr>`;
+  const subrow=(lbl,a,b)=>`<tr class="sub"><td>${lbl}</td><td>${sum('par',a,b)}</td><td></td>${TEES.map(t=>`<td class="${t.k===tee?'tc':''}">${sum(t.k,a,b)}</td>`).join('')}<td></td></tr>`;
+  $('sc').innerHTML=head+'<tbody>'+H.slice(0,9).map(row).join('')+subrow('Out',0,9)+H.slice(9).map(row).join('')+subrow('In',9,18)+subrow('Total',0,18)+'</tbody>';
+  $('sc').querySelectorAll('tr[data-h]').forEach(tr=>tr.onclick=()=>location.hash='hole-'+tr.dataset.h);
+  $('sc').classList.add('sel');
+}
+
+/* ---------- tap distances ---------- */
+function showTap(e,n){
+  const h=H[cur-1], g=h.green.c, t=h.line[0], sh=shift(h);
+  const toPin=Math.round(len(sub(g,[e,n]))*YD), fromTee=Math.max(0,Math.round(len(sub([e,n],t))*YD-sh));
+  const dz=Math.round((hAt(g[0],g[1])-hAt(e,n))*FT);
+  $('tapinfo').innerHTML=`<div><span>Pin</span><b>${toPin}</b><span>Tee</span><b>${fromTee}</b><span>Green</span><b>${dz>0?'+':''}${dz}<small> ft</small></b></div>`;
+}
+function clearTap(){ $('tapinfo').innerHTML='<div><span>Tap the course for distances</span></div>'; }
+
+/* ---------- 2D hole map ---------- */
+const c2=$('c2d'); let tap2=null;
+function draw2d(){
+  const h=H[cur-1]; const {pts,tee:t,gc}=holeGeom(h);
+  const r=c2.getBoundingClientRect(); const dpr=Math.min(2,window.devicePixelRatio||1);
+  c2.width=r.width*dpr; c2.height=r.height*dpr;
+  const ctx=c2.getContext('2d'); ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle='#cfd8cf'; ctx.fillRect(0,0,c2.width,c2.height);
+  const dv=sub(gc,t), L=len(dv);
+  const phi=-Math.PI/2-Math.atan2(-dv[1],dv[0]);
+  const c=[(t[0]+gc[0])/2,(t[1]+gc[1])/2];
+  const s=Math.min(r.height*0.80/(L+50), r.width*0.95/120)*dpr;
+  const M={c,phi,s,dpr,W:c2.width,H:c2.height};
+  c2._M=M;
+  ctx.translate(c2.width/2,c2.height/2+8*dpr); ctx.scale(s,s); ctx.rotate(phi);
+  const P=p=>[p[0]-c[0],-(p[1]-c[1])];
+  if(aerial.complete&&aerial.naturalWidth) ctx.drawImage(aerial,E0-c[0],-(N1-c[1]),E1-E0,N1-N0);
+  const poly=(arr,stroke,fill,w)=>{ctx.beginPath();arr.forEach((p,i)=>{const q=P(p);i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])});ctx.closePath();if(fill){ctx.fillStyle=fill;ctx.fill()}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=w/s*dpr;ctx.stroke()}};
+  course.features.water.forEach(p=>poly(p,'rgba(255,255,255,.55)',null,1));
+  course.features.bunkers.forEach(p=>poly(p,'rgba(255,255,255,.75)',null,1));
+  poly(h.green.poly,'#ffffff',null,2);
+  // distance arcs from green center
+  ctx.save();
+  [100,150,200,250].forEach(yd=>{const rr=yd/YD; if(rr>L+10) return; const q=P(gc); ctx.beginPath(); ctx.arc(q[0],q[1],rr,0,Math.PI*2); ctx.strokeStyle='rgba(255,255,255,.55)'; ctx.setLineDash([6/s*dpr,6/s*dpr]); ctx.lineWidth=1.2/s*dpr; ctx.stroke();});
+  ctx.restore();
+  // center line
+  ctx.beginPath(); pts.forEach((p,i)=>{const q=P(p);i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])});
+  ctx.strokeStyle='rgba(255,255,255,.95)'; ctx.lineWidth=2/s*dpr; ctx.setLineDash([]); ctx.stroke();
+  // screen-space labels
+  ctx.setTransform(1,0,0,1,0,0);
+  const toScr=p=>{const q=P(p);const x=q[0]*Math.cos(phi)-q[1]*Math.sin(phi), y=q[0]*Math.sin(phi)+q[1]*Math.cos(phi);return [c2.width/2+x*s, c2.height/2+8*dpr+y*s]};
+  M.toScr=toScr;
+  const label=(xy,txt,bg,fg,size=13)=>{ctx.font=`700 ${size*dpr}px "Barlow Condensed",sans-serif`;const w=ctx.measureText(txt).width+10*dpr,hh=(size+7)*dpr;ctx.fillStyle=bg;roundRect(ctx,xy[0]-w/2,xy[1]-hh/2,w,hh,5*dpr);ctx.fill();ctx.fillStyle=fg;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(txt,xy[0],xy[1]+.5*dpr)};
+  [100,150,200,250].forEach(yd=>{const rr=yd/YD; if(rr>L-15) return; const tot=polyLen(pts); const p=pointAlong(pts,tot-rr); label(toScr(p),String(yd),'rgba(20,36,29,.82)','#fff',12)});
+  const sh=shift(h);
+  h.hazards.filter(z=>z.carry-sh>20&&!z.ng).forEach(z=>{const xy=toScr(z.c);label([xy[0],xy[1]],String(z.carry-sh),z.kind==='water'?'#3a7ca5':'#c9a45c','#fff',13)});
+  // tee & pin
+  const tx=toScr(t); ctx.fillStyle='#fff';ctx.strokeStyle='#14241d';ctx.lineWidth=2*dpr;ctx.beginPath();ctx.arc(tx[0],tx[1],7*dpr,0,7);ctx.fill();ctx.stroke();
+  const gx=toScr(gc); ctx.strokeStyle='#fff';ctx.lineWidth=2*dpr;ctx.beginPath();ctx.moveTo(gx[0],gx[1]);ctx.lineTo(gx[0],gx[1]-26*dpr);ctx.stroke();
+  ctx.fillStyle='#d23b2a';ctx.beginPath();ctx.moveTo(gx[0],gx[1]-26*dpr);ctx.lineTo(gx[0]+14*dpr,gx[1]-21*dpr);ctx.lineTo(gx[0],gx[1]-16*dpr);ctx.closePath();ctx.fill();
+  label([gx[0],gx[1]+16*dpr],String(h.yards[tee]),'#d23b2a','#fff',14);
+  if(tap2){const xy=toScr(tap2);ctx.strokeStyle='#fff';ctx.lineWidth=2*dpr;ctx.setLineDash([5*dpr,4*dpr]);ctx.beginPath();ctx.moveTo(xy[0],xy[1]);ctx.lineTo(gx[0],gx[1]);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#ffd23f';ctx.beginPath();ctx.arc(xy[0],xy[1],6*dpr,0,7);ctx.fill();ctx.stroke()}
+  // north arrow
+  ctx.save();ctx.translate(26*dpr,c2.height-30*dpr);ctx.rotate(phi);ctx.fillStyle='rgba(255,255,255,.9)';ctx.beginPath();ctx.moveTo(0,-12*dpr);ctx.lineTo(6*dpr,8*dpr);ctx.lineTo(0,4*dpr);ctx.lineTo(-6*dpr,8*dpr);ctx.closePath();ctx.fill();ctx.restore();
+  ctx.font=`600 ${11*dpr}px "Barlow",sans-serif`;ctx.fillStyle='#fff';ctx.textAlign='center';ctx.fillText('N',26*dpr,c2.height-6*dpr);
+}
+function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+c2.addEventListener('click',ev=>{
+  const M=c2._M; if(!M) return; const r=c2.getBoundingClientRect();
+  const sx=(ev.clientX-r.left)*M.dpr-M.W/2, sy=(ev.clientY-r.top)*M.dpr-M.H/2-8*M.dpr;
+  const x=sx/M.s, y=sy/M.s; const cp=Math.cos(-M.phi), sp=Math.sin(-M.phi);
+  const qx=x*cp-y*sp, qy=x*sp+y*cp; const e=qx+M.c[0], n=-qy+M.c[1];
+  tap2=[e,n]; showTap(e,n); draw2d();
+});
+
+/* ---------- 3D ---------- */
+let three=null;
+function init3d(objs){
+  if(!window.THREE) throw new Error('3D library did not load');
+  const canvas=$('c3d');
+  const mobile=Math.min(screen.width,screen.height)<700;
+  const renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
+  renderer.setPixelRatio(Math.min(mobile?1.75:2,window.devicePixelRatio||1));
+  renderer.outputEncoding=THREE.sRGBEncoding;
+  renderer.toneMapping=THREE.NoToneMapping;
+  renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  const scene=new THREE.Scene();
+  scene.background=new THREE.Color('#a9c6dc');
+  scene.fog=new THREE.Fog('#b8cfdf',600,1900);
+  const camera=new THREE.PerspectiveCamera(46,1,1,6000);
+  const controls=new THREE.OrbitControls(camera,canvas);
+  controls.enableDamping=true; controls.dampingFactor=.08; controls.maxPolarAngle=Math.PI*0.48; controls.minDistance=12; controls.maxDistance=1600;
+  scene.add(new THREE.HemisphereLight('#e4f0ff','#4a5a34',0.55));
+  const sun=new THREE.DirectionalLight('#fff3dc',0.95);
+  sun.castShadow=true; const sm=mobile?2048:4096; sun.shadow.mapSize.set(sm,sm);
+  sun.shadow.bias=-0.0006; sun.shadow.normalBias=0.6;
+  scene.add(sun); scene.add(sun.target);
+
+  const W=E1-E0, Hn=N1-N0;
+  const geo=new THREE.PlaneGeometry(W,Hn,nx-1,ny-1); geo.rotateX(-Math.PI/2);
+  const pos=geo.attributes.position;
+  const tex=new THREE.Texture(aerial); tex.encoding=THREE.sRGBEncoding; tex.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy()); tex.needsUpdate=true;
+  const mat=new THREE.MeshLambertMaterial({map:tex});
+  const mesh=new THREE.Mesh(geo,mat); mesh.position.set((E0+E1)/2,0,-(N0+N1)/2); mesh.receiveShadow=true; mesh.castShadow=true; scene.add(mesh);
+  const skirt=new THREE.Mesh(new THREE.PlaneGeometry(9000,9000),new THREE.MeshLambertMaterial({color:'#6f8a45'}));
+  skirt.rotateX(-Math.PI/2); skirt.position.set(0,0,0); skirt.receiveShadow=false; scene.add(skirt);
+  const waterM=new THREE.MeshPhongMaterial({color:'#3f7fa6',specular:'#d6ecff',shininess:90,transparent:true,opacity:0.93});
+  const waterG=new THREE.Group(); scene.add(waterG);
+  (tmeta.water||[]).forEach(w=>{const sh=new THREE.Shape(w.p.map(([e,n])=>new THREE.Vector2(e,n))); const g=new THREE.ShapeGeometry(sh); g.rotateX(-Math.PI/2);
+    const m=new THREE.Mesh(g,waterM); m.userData.z=w.z; m.receiveShadow=true; waterG.add(m);});
+  const holeGroup=new THREE.Group(); scene.add(holeGroup);
+  const st={waterG,skirt,renderer,scene,camera,controls,geo,pos,mesh,holeGroup,sun,objs,exag:+store.get('crown-exag2','1')||1,anim:null,tapMarker:null,trees:null,blds:null};
+  three=st;
+  buildObjects();
+  applyExag();
+  const ro=new ResizeObserver(()=>resize3d()); ro.observe($('stage')); resize3d();
+  let down=null;
+  canvas.addEventListener('pointerdown',e=>{down=[e.clientX,e.clientY,performance.now()]; st.anim=null;});
+  canvas.addEventListener('pointerup',e=>{ if(!down) return; const d=Math.hypot(e.clientX-down[0],e.clientY-down[1]); if(d<6&&performance.now()-down[2]<500) pick3d(e); down=null;});
+  (function loop(){requestAnimationFrame(loop); if(view!=='3d') return; if(st.anim) st.anim(); controls.update(); renderer.render(scene,camera);})();
+}
+function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function buildObjects(){
+  const st=three, T=st.objs.trees, rnd=mulberry(7);
+  const dec=T.filter(t=>!t[5]), con=T.filter(t=>t[5]);
+  let crownG=new THREE.IcosahedronGeometry(1,2); crownG.deleteAttribute('normal'); crownG.deleteAttribute('uv'); crownG=THREE.BufferGeometryUtils.mergeVertices(crownG);
+  // lumpy crowns: jitter vertices once
+  const cp=crownG.attributes.position; for(let i=0;i<cp.count;i++){const k=1+(rnd()-.5)*0.22; cp.setXYZ(i,cp.getX(i)*k,cp.getY(i)*k,cp.getZ(i)*k)} crownG.computeVertexNormals();
+  const coneG=new THREE.ConeGeometry(1,1,9,1); coneG.translate(0,0.5,0);
+  const trunkG=new THREE.CylinderGeometry(0.16,0.26,1,6,1); trunkG.translate(0,0.5,0);
+  const leafM=new THREE.MeshLambertMaterial({color:'#ffffff',flatShading:false});
+  const trunkM=new THREE.MeshLambertMaterial({color:'#5a4634'});
+  const decM=new THREE.InstancedMesh(crownG,leafM,dec.length);
+  const conM=new THREE.InstancedMesh(coneG,leafM.clone(),con.length*2);
+  const trM=new THREE.InstancedMesh(trunkG,trunkM,T.length);
+  [decM,conM,trM].forEach(m=>{m.castShadow=true; m.receiveShadow=false;});
+  const c=new THREE.Color(), mtx=new THREE.Matrix4(), q=new THREE.Quaternion(), sc=new THREE.Vector3(), p=new THREE.Vector3();
+  st.trees={dec,con,decM,conM,trM,update(){
+    const ex=three.exag; let ti=0;
+    dec.forEach((t,i)=>{const [e,n,gz,h,r]=t; const g=hAt(e,n)*ex; const ch=Math.min(h*0.62,r*2.1), cy=g+h-ch/2;
+      sc.set(r*1.02,ch/2,r*1.02); p.set(e,cy,-n); q.setFromAxisAngle(new THREE.Vector3(0,1,0),i*1.7); mtx.compose(p,q,sc); decM.setMatrixAt(i,mtx);
+      sc.set(Math.max(.7,r*.09),h-ch*0.7,Math.max(.7,r*.09)); p.set(e,g-0.3,-n); q.identity(); mtx.compose(p,q,sc); trM.setMatrixAt(ti++,mtx);});
+    con.forEach((t,i)=>{const [e,n,gz,h,r]=t; const g=hAt(e,n)*ex; const rr=Math.max(1.4,Math.min(r,h*0.28));
+      sc.set(rr,h*0.62,rr); p.set(e,g+h*0.22,-n); q.identity(); mtx.compose(p,q,sc); conM.setMatrixAt(2*i,mtx);
+      sc.set(rr*0.72,h*0.42,rr*0.72); p.set(e,g+h*0.58,-n); mtx.compose(p,q,sc); conM.setMatrixAt(2*i+1,mtx);
+      sc.set(.8,h*0.3,.8); p.set(e,g-0.3,-n); mtx.compose(p,q,sc); trM.setMatrixAt(ti++,mtx);});
+    decM.instanceMatrix.needsUpdate=conM.instanceMatrix.needsUpdate=trM.instanceMatrix.needsUpdate=true;
+    [decM,conM,trM].forEach(m=>{m.frustumCulled=false;});
+  }};
+  dec.forEach((t,i)=>{const v=rnd(); c.setHSL(0.23+v*0.08,0.45+rnd()*0.2,0.13+rnd()*0.07); decM.setColorAt(i,c)});
+  con.forEach((t,i)=>{c.setHSL(0.37+rnd()*0.05,0.38+rnd()*0.12,0.085+rnd()*0.04); conM.setColorAt(2*i,c); conM.setColorAt(2*i+1,c)});
+  st.scene.add(decM,conM,trM);
+  // buildings
+  const roofM=new THREE.MeshLambertMaterial({color:'#5e5a57'}), wallM=new THREE.MeshLambertMaterial({color:'#d9d1c4'});
+  const bg=new THREE.Group(); st.scene.add(bg);
+  const bM=new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide});
+  st.blds={group:bg,update(){
+    while(bg.children.length){const o=bg.children.pop(); o.geometry.dispose();}
+    const ex=three.exag, parts=[], roofC=new THREE.Color('#5d5955'), wallC=new THREE.Color('#d8cfc1'), trimC=new THREE.Color('#bfb5a6');
+    st.objs.buildings.forEach((b,bi)=>{
+      const shape=new THREE.Shape(b.p.map(([e,n])=>new THREE.Vector2(e,n)));
+      let g=new THREE.ExtrudeGeometry(shape,{depth:b.h+2,bevelEnabled:false});
+      g.rotateX(-Math.PI/2); g.translate(0,(b.b-tmeta.base)*ex-2,0);
+      g=g.index?g.toNonIndexed():g; g.clearGroups(); g.computeVertexNormals();
+      const nrm=g.attributes.normal, cnt=nrm.count, col=new Float32Array(cnt*3);
+      const wc=(bi%3===0)?trimC:wallC;
+      for(let i=0;i<cnt;i++){const cc=Math.abs(nrm.getY(i))>0.6?roofC:wc; col[i*3]=cc.r;col[i*3+1]=cc.g;col[i*3+2]=cc.b;}
+      g.setAttribute('color',new THREE.BufferAttribute(col,3)); if(g.attributes.uv) g.deleteAttribute('uv');
+      parts.push(g);
+    });
+    if(!parts.length) return;
+    const merged=THREE.BufferGeometryUtils.mergeBufferGeometries(parts,false);
+    const m=new THREE.Mesh(merged,bM); m.castShadow=true; m.receiveShadow=true; bg.add(m);
+  }};
+}
+function applyExag(){
+  const st=three; const p=st.pos;
+  const band=40; for(let j=0;j<ny;j++) for(let i=0;i<nx;i++){ const k=j*nx+i; const d=Math.min(i,j,nx-1-i,ny-1-j); const w=d>=band?1:Math.sin(d/band*Math.PI/2); p.setY(k,Q[k]*scale*st.exag*w-2*(1-w)); }
+  if(st.skirt){ st.skirt.position.y=-3; }
+  p.needsUpdate=true; st.geo.computeVertexNormals(); st.geo.computeBoundingSphere(); st.geo.computeBoundingBox();
+  $('exag').textContent='Relief '+st.exag+'×';
+  if(st.trees) st.trees.update(); if(st.blds) st.blds.update();
+  if(st.waterG) st.waterG.children.forEach(m=>m.position.y=(m.userData.z-tmeta.base)*st.exag+0.05);
+  buildHole3d();
+}
+const toV=(e,n,lift=0)=>new THREE.Vector3(e,hAt(e,n)*three.exag+lift,-n);
+function textSprite(txt,bg,fg,h=7){ h=h*0.0052;
+  const c=document.createElement('canvas'), ctx=c.getContext('2d'); const fs=64;
+  ctx.font=`700 ${fs}px "Barlow Condensed",sans-serif`; const w=Math.ceil(ctx.measureText(txt).width)+36;
+  c.width=w; c.height=fs+26; ctx.font=`700 ${fs}px "Barlow Condensed",sans-serif`;
+  ctx.fillStyle=bg; roundRect(ctx,0,0,c.width,c.height,16); ctx.fill(); ctx.fillStyle=fg; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(txt,c.width/2,c.height/2+3);
+  const t=new THREE.CanvasTexture(c); t.encoding=THREE.sRGBEncoding;
+  const m=new THREE.SpriteMaterial({map:t,depthTest:false,transparent:true,sizeAttenuation:false}); const s=new THREE.Sprite(m);
+  s.scale.set(h*c.width/c.height,h,1); s.renderOrder=10; return s;
+}
+function buildHole3d(){
+  if(!three) return; const st=three, g=st.holeGroup;
+  while(g.children.length){const o=g.children.pop(); o.traverse(x=>{if(x.geometry)x.geometry.dispose(); if(x.material){if(x.material.map)x.material.map.dispose(); x.material.dispose()}})}
+  const h=H[cur-1]; const {pts,tee:t,gc}=holeGeom(h); const tot=polyLen(pts);
+  fitShadow(pts,tot);
+  const path=[]; for(let d=0;d<=tot;d+=3) {const p=pointAlong(pts,d); path.push(toV(p[0],p[1],1.6));}
+  path.push(toV(gc[0],gc[1],1.6));
+  const curve=new THREE.CatmullRomCurve3(path);
+  g.add(new THREE.Mesh(new THREE.TubeGeometry(curve,Math.max(40,path.length*2),0.55,6,false),new THREE.MeshBasicMaterial({color:'#ffffff',transparent:true,opacity:.92})));
+  // green outline
+
+  // flag
+  const base=toV(gc[0],gc[1],0); const pole=new THREE.Mesh(new THREE.CylinderGeometry(.25,.25,9,8),new THREE.MeshBasicMaterial({color:'#f5f5f5'}));
+  pole.position.copy(base).add(new THREE.Vector3(0,4.5,0)); g.add(pole);
+  const fg=new THREE.BufferGeometry(); fg.setAttribute('position',new THREE.Float32BufferAttribute([0,9,0, 0,6,0, 4.2,7.5,0],3));
+  const flag=new THREE.Mesh(fg,new THREE.MeshBasicMaterial({color:'#d23b2a',side:THREE.DoubleSide})); flag.position.copy(base); g.add(flag);
+  // tee marker
+  const tm=new THREE.Mesh(new THREE.CylinderGeometry(2.2,2.2,.8,24),new THREE.MeshBasicMaterial({color:'#ffffff'})); tm.position.copy(toV(t[0],t[1],.4)); g.add(tm);
+  // distance markers
+  [100,150,200,250].forEach(yd=>{const rr=yd/YD; if(rr>tot-15) return; const p=pointAlong(pts,tot-rr); const s=textSprite(String(yd),'rgba(20,36,29,.85)','#ffffff',6); s.position.copy(toV(p[0],p[1],7)); g.add(s);});
+  const sh=shift(h);
+  h.hazards.filter(z=>z.carry-sh>20&&!z.ng).forEach(z=>{const s=textSprite(String(z.carry-sh),z.kind==='water'?'#3a7ca5':'#c9a45c','#ffffff',5.5); s.position.copy(toV(z.c[0],z.c[1],6)); g.add(s);});
+  const ps=textSprite(String(h.yards[tee]),'#d23b2a','#ffffff',7); ps.position.copy(base).add(new THREE.Vector3(0,13,0)); g.add(ps);
+  if(st.tapMarker){ g.add(st.tapMarker.group); }
+}
+function fitShadow(pts,tot){
+  const st=three, mid=pointAlong(pts,tot/2), half=tot/2+170;
+  const tgt=new THREE.Vector3(mid[0],hAt(mid[0],mid[1])*st.exag,-mid[1]);
+  st.sun.target.position.copy(tgt);
+  st.sun.position.copy(tgt).add(new THREE.Vector3(-420,520,330)); // afternoon sun from the southwest
+  const sc=st.sun.shadow.camera; sc.left=-half; sc.right=half; sc.top=half; sc.bottom=-half; sc.near=50; sc.far=1800; sc.updateProjectionMatrix();
+  st.sun.target.updateMatrixWorld();
+}
+function greenView(){
+  const st=three, h=H[cur-1]; const {pts,gc}=holeGeom(h); const tot=polyLen(pts);
+  const p=pointAlong(pts,Math.max(0,tot-60)); const d=sub(gc,p); const L=len(d); const u=[d[0]/L,d[1]/L];
+  const ce=gc[0]-u[0]*55, cn=gc[1]-u[1]*55;
+  moveCam(new THREE.Vector3(ce,hAt(ce,cn)*st.exag+18,-cn), toV(gc[0],gc[1],0), 900);
+}
+function teeView(animate=true){
+  const st=three, h=H[cur-1]; const {pts,tee:t,gc}=holeGeom(h);
+  const tot=polyLen(pts); const p1=pointAlong(pts,Math.min(25,tot*.1));
+  const dir=sub(p1,t); const dl=len(dir); const u=[dir[0]/dl,dir[1]/dl];
+  const back=Math.max(55,tot*0.2), up=Math.max(55,tot*0.27)+(st.exag-1)*20;
+  const camE=t[0]-u[0]*back, camN=t[1]-u[1]*back;
+  const camPos=new THREE.Vector3(camE,(Math.max(hAt(camE,camN),hAt(t[0],t[1])))*st.exag+up,-camN);
+  const tgt2=pointAlong(pts,tot*0.48); const tgt=toV(tgt2[0],tgt2[1],0);
+  moveCam(camPos,tgt,animate?900:0);
+}
+function moveCam(pos,tgt,ms){
+  const st=three; const p0=st.camera.position.clone(), t0=st.controls.target.clone(); const t1=performance.now();
+  if(!ms||window.matchMedia('(prefers-reduced-motion: reduce)').matches){st.camera.position.copy(pos);st.controls.target.copy(tgt);st.anim=null;return}
+  st.anim=()=>{const k=Math.min(1,(performance.now()-t1)/ms); const e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2; st.camera.position.lerpVectors(p0,pos,e); st.controls.target.lerpVectors(t0,tgt,e); if(k>=1) st.anim=null;};
+}
+function flyHole(){
+  const st=three, h=H[cur-1]; const {pts,gc}=holeGeom(h); const tot=polyLen(pts);
+  const dur=Math.max(6500,tot*20); const t1=performance.now();
+  st.anim=()=>{
+    const k=Math.min(1,(performance.now()-t1)/dur); const e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
+    const d=e*(tot-20); const p=pointAlong(pts,Math.max(0,d-35)); const look=pointAlong(pts,Math.min(tot,d+70));
+    const alt=Math.max(30,60-30*e)+(st.exag-1)*12;
+    st.camera.position.copy(toV(p[0],p[1],alt)); st.controls.target.copy(toV(look[0],look[1],0));
+    if(k>=1){ st.anim=null; const g=toV(gc[0],gc[1],0); }
+  };
+}
+function pick3d(ev){
+  const st=three; const r=$('c3d').getBoundingClientRect();
+  const m=new THREE.Vector2(((ev.clientX-r.left)/r.width)*2-1, -((ev.clientY-r.top)/r.height)*2+1);
+  const rc=new THREE.Raycaster(); rc.setFromCamera(m,st.camera);
+  const o=rc.ray.origin.clone(), dvec=rc.ray.direction; let tprev=0, hit=null;
+  for(let t=1;t<4000;t+=Math.max(0.5,t*0.004)){ const q=o.clone().addScaledVector(dvec,t); if(q.y<=hAt(q.x,-q.z)*st.exag){ let a=tprev,b=t; for(let k=0;k<20;k++){const mid=(a+b)/2, r=o.clone().addScaledVector(dvec,mid); if(r.y<=hAt(r.x,-r.z)*st.exag) b=mid; else a=mid;} hit=o.clone().addScaledVector(dvec,b); break;} tprev=t; }
+  if(!hit) return; const e=hit.x, n=-hit.z;
+  if(st.tapMarker){st.holeGroup.remove(st.tapMarker.group); st.tapMarker.group.traverse(x=>{if(x.geometry)x.geometry.dispose(); if(x.material)x.material.dispose()})}
+  const grp=new THREE.Group(); const h=H[cur-1]; const g=h.green.c;
+  const a=toV(e,n,1), b=toV(g[0],g[1],1);
+  const mid=a.clone().lerp(b,.5); mid.y+=a.distanceTo(b)*0.18;
+  const arc=new THREE.QuadraticBezierCurve3(a,mid,b);
+  grp.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(arc.getPoints(40)),new THREE.LineDashedMaterial({color:'#ffd23f',dashSize:3,gapSize:2})));
+  grp.children[0].computeLineDistances();
+  const dot=new THREE.Mesh(new THREE.SphereGeometry(3,16,12),new THREE.MeshBasicMaterial({color:'#ffd23f',depthTest:false})); dot.renderOrder=9; dot.position.copy(a); grp.add(dot);
+  st.tapMarker={group:grp}; st.holeGroup.add(grp);
+  showTap(e,n);
+}
+function resize3d(){ if(!three) return; const r=$('stage').getBoundingClientRect(); three.renderer.setSize(r.width,r.height,false); three.camera.aspect=r.width/r.height; three.camera.updateProjectionMatrix(); }
+
+$('exag').onclick=()=>{const seq=[1,1.5,2]; const st=three; st.exag=seq[(seq.indexOf(st.exag)+1)%seq.length]; store.set('crown-exag2',st.exag); applyExag(); teeView(false);};
+$('greenv').onclick=()=>greenView();
+$('reset').onclick=()=>teeView(true);
+$('fly').onclick=()=>flyHole();
+function setView(v){
+  view=v; $('v3d').setAttribute('aria-pressed',v==='3d'); $('v2d').setAttribute('aria-pressed',v==='2d');
+  $('l3d').hidden=v!=='3d'; $('l2d').hidden=v!=='2d'; $('tools3d').style.visibility=v==='3d'?'visible':'hidden';
+  if(v==='2d') draw2d();
+}
+$('v3d').onclick=()=>{ if(three) setView('3d') }; $('v2d').onclick=()=>setView('2d');
+new ResizeObserver(()=>{if(view==='2d')draw2d()}).observe($('stage'));
+
+/* ---------- routing ---------- */
+function route(){
+  const m=location.hash.match(/^#hole-(\d+)$/);
+  const isCard=location.hash==='#card';
+  $('holeView').hidden=isCard; $('cardView').hidden=!isCard;
+  $('holes').querySelectorAll('button').forEach(b=>b.setAttribute('aria-current', isCard? String(b.dataset.h==='card') : String(+b.dataset.h===(m?+m[1]:cur))));
+  if(isCard){renderCard();return}
+  const n=m?Math.min(18,Math.max(1,+m[1])):cur;
+  const changed=n!==cur; cur=n;
+  if(changed||!route.done){ tap2=null; clearTap(); if(three){ if(three.tapMarker){three.holeGroup.remove(three.tapMarker.group); three.tapMarker=null} buildHole3d(); teeView(route.done);} }
+  route.done=true;
+  renderPanel(); if(view==='2d') draw2d();
+  const btn=$('holes').querySelector(`[data-h="${cur}"]`); btn&&btn.scrollIntoView({block:'nearest',inline:'center'});
+}
+window.addEventListener('hashchange',route);
+
+renderTees(); renderCard();
+await aerialReady;
+let objs={trees:[],buildings:[]}; try{ objs=await objectsP; }catch(e){}
+try{ init3d(objs); }catch(err){ console.warn(err); $('v3d').disabled=true; setView('2d'); $('tapinfo').innerHTML='<div><span>3D needs WebGL, so this shows the hole map</span></div>'; }
+route();
+if(three) teeView(false);
+})();
+</script>
+</body>
+</html>
