@@ -637,6 +637,8 @@ window.addEventListener('hashchange',route);
 
 renderTees(); renderCard();
 window.YB={H,course,hooks:{},cur:()=>cur,tee:()=>tee,
+  // tee position for a tee set (measured back along the centre line from the back tee) and green centre
+  geom(h,t){const g=holeGeom(h);const d=(h.yards.Black-(h.yards[t]??h.yards.Black))/YD;return {tee:d>0?pointAlong(g.pts,d):g.tee,gc:g.gc,poly:h.green.poly};},
   refresh(){ if(three) buildHole3d(); if(view==='2d') draw2d(); },
   refresh2d(){ if(view==='2d') draw2d(); }};
 await aerialReady;

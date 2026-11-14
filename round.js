@@ -293,6 +293,13 @@ function ensureChrome() {
   .crow{display:grid;grid-template-columns:1.6fr 1fr 1fr .8fr;gap:8px;align-items:end;padding:8px 0;border-bottom:1px solid var(--rule)}
   @media (max-width:520px){.crow{grid-template-columns:1fr 1fr .8fr}.crow .cname{grid-column:1/-1}}
   .rsheet{max-width:640px}
+  .pastwrap{position:absolute;left:10px;bottom:58px;z-index:3;display:flex;gap:6px;flex-wrap:wrap}.pastwrap[hidden]{display:none}
+  .pastwrap .chip[aria-pressed="false"]{opacity:.6;text-decoration:line-through}
+  .trwrap{display:flex;justify-content:center;margin:8px 0;background:#0f1a15;border-radius:10px;overflow:hidden}
+  .trwrap canvas{touch-action:manipulation;cursor:crosshair;display:block}
+  .trlist{display:grid;gap:6px;margin:8px 0}.trrow{display:grid;grid-template-columns:1fr auto 1.3fr;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--rule)}
+  .trrow select{font:15px var(--body);padding:8px;border:1px solid var(--rule);border-radius:8px;min-height:40px;background:#fff}
+  .trrow b{font:700 18px var(--display)}
   .cp{position:relative}.cp-in{width:100%;box-sizing:border-box}
   .cp-list{display:grid;border:1px solid var(--rule);border-radius:8px;margin-top:4px;overflow:hidden;background:#fff}
   .cp-list button{display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:2px;padding:10px 12px;border:0;border-bottom:1px solid var(--rule);background:#fff;font:15px var(--body);color:var(--ink);cursor:pointer;min-height:44px}
@@ -410,7 +417,7 @@ function renderAcct() {
 
 /* ------------------------------------------------------------------ my scorecard view */
 let viewRoundId = null;
-const viewRound = () => data.rounds.find(r => r.id === viewRoundId) || activeRound() || data.rounds.filter(r => r.course === COURSE_ID).sort((a, b) => b.started_at.localeCompare(a.started_at))[0] || null;
+const viewRound = () => data.rounds.find(r => r.id === viewRoundId && r.status !== 'imported') || activeRound() || data.rounds.filter(r => r.course === COURSE_ID && r.status !== 'imported').sort((a, b) => b.started_at.localeCompare(a.started_at))[0] || null;
 function totals(r) {
   let s = 0, p = 0, par = 0, n = 0, putts = 0, fwH = 0, fwN = 0;
   for (let i = 1; i <= 18; i++) {
@@ -422,7 +429,7 @@ function totals(r) {
 }
 function renderMyCard() {
   const el = $('myCard'); if (!el) return;
-  const rounds = data.rounds.filter(r => r.course === COURSE_ID).sort((a, b) => b.started_at.localeCompare(a.started_at));
+  const rounds = data.rounds.filter(r => r.course === COURSE_ID && r.status !== 'imported').sort((a, b) => b.started_at.localeCompare(a.started_at));
   const r = viewRound();
   if (!r) {
     el.innerHTML = `<h2>Your scorecard</h2><p class="rm">Tap <b>Start round</b> at the top to keep score, track shots and get GPS distances.</p>`;
@@ -462,8 +469,9 @@ function renderMyCard() {
 }
 
 /* ------------------------------------------------------------------ map overlays for this round's shots */
+function shotRoundId() { const a = activeRound(); if (a) return a.id; const v = viewRoundId && data.rounds.find(x => x.id === viewRoundId && !isImported(x)); return v ? v.id : null; }
 function shotPathsForHole(hole) {
-  const r = activeRound() || viewRound(); if (!r) return [];
+  const rid = shotRoundId(); const r = rid && data.rounds.find(x => x.id === rid); if (!r) return [];
   const pts = roundShots(r.id, hole).filter(s => s.lat != null).map(s => ({ en: G.toEN(s.lat, s.lon), s }));
   return pts;
 }
@@ -509,6 +517,197 @@ function build3dOverlay(group, THREE, toV) {
     const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts3), new THREE.LineBasicMaterial({ color: '#ffd23f', depthTest: false }));
     l.renderOrder = 10; group.add(l);
   }
+}
+
+
+/* ------------------------------------------------------------------ past shots on each hole */
+const LS_PASTOFF = 'yb-past-off';
+let pastOff = new Set(store.get(LS_PASTOFF, []));
+const isImported = r => r.status === 'imported';
+// every earlier trail on this hole: rounds played with this app + shots traced from screenshots
+function pastPaths(hole) {
+  const bright = shotRoundId();
+  return data.rounds.filter(r => r.course === COURSE_ID && r.id !== bright).map(r => {
+    const pts = roundShots(r.id, hole).filter(s => s.lat != null && s.kind !== 'penalty').map(s => ({ en: G.toEN(s.lat, s.lon), s }));
+    return { r, pts };
+  }).filter(p => p.pts.length > 1);
+}
+function pastOn(hole) { return !pastOff.has(hole); }
+function setPast(hole, on) { if (on) pastOff.delete(hole); else pastOff.add(hole); store.set(LS_PASTOFF, [...pastOff]); renderPastBtn(); YB.refresh(); }
+function renderPastBtn() {
+  let wrap = $('pastWrap');
+  if (!wrap) {
+    const stage = $('stage'); if (!stage) return;
+    wrap = document.createElement('div'); wrap.id = 'pastWrap'; wrap.className = 'pastwrap'; stage.appendChild(wrap);
+  }
+  if (!/^#?(hole-\d+)?$/.test(location.hash) || !G) { wrap.hidden = true; return; }
+  const hole = YB.cur(), n = pastPaths(hole).length, on = pastOn(hole);
+  wrap.hidden = false;
+  wrap.innerHTML = (n ? `<button class="chip" id="pastBtn" aria-pressed="${on}" title="Show or hide earlier shots on this hole">Past shots · ${n}</button>` : '')
+    + `<button class="chip" id="traceBtn" title="Add shots from an 18Birdies screenshot">+ Shots</button>`;
+  if ($('pastBtn')) $('pastBtn').onclick = () => setPast(hole, !pastOn(hole));
+  $('traceBtn').onclick = () => openTrace(hole);
+}
+// one round's shots drawn faintly; the last point is where the ball finished
+function drawPast2d(ctx, toScr, dpr) {
+  const hole = YB.cur(); if (!pastOn(hole)) return;
+  ctx.save();
+  pastPaths(hole).forEach(({ pts }) => {
+    ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.lineWidth = 1.8 * dpr; ctx.setLineDash([]);
+    ctx.beginPath(); pts.forEach((p, i) => { const xy = toScr(p.en); i ? ctx.lineTo(xy[0], xy[1]) : ctx.moveTo(xy[0], xy[1]); }); ctx.stroke();
+    pts.slice(1).forEach((p, i) => { const xy = toScr(p.en), last = i === pts.length - 2;
+      ctx.fillStyle = last ? 'rgba(255,255,255,.8)' : 'rgba(255,224,130,.75)'; ctx.strokeStyle = 'rgba(20,36,29,.55)'; ctx.lineWidth = 1 * dpr;
+      ctx.beginPath(); ctx.arc(xy[0], xy[1], 4 * dpr, 0, 7); ctx.fill(); ctx.stroke(); });
+  });
+  ctx.restore();
+}
+function buildPast3d(group, THREE, toV) {
+  const hole = YB.cur(); if (!pastOn(hole)) return;
+  const paths = pastPaths(hole); if (!paths.length) return;
+  const lmat = new THREE.LineBasicMaterial({ color: '#fbf8ee', transparent: true, opacity: 0.5, depthTest: false });
+  // landing spots: same size on screen at any zoom, so they read from the tee view and up close
+  if (!buildPast3d.tex) {
+    const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d');
+    x.fillStyle = 'rgba(20,36,29,.6)'; x.beginPath(); x.arc(32, 32, 30, 0, 7); x.fill();
+    x.fillStyle = '#fff'; x.beginPath(); x.arc(32, 32, 23, 0, 7); x.fill();
+    buildPast3d.tex = new THREE.CanvasTexture(c);
+  }
+  const dot = (color, size, op) => new THREE.PointsMaterial({ color, size, map: buildPast3d.tex, alphaTest: 0.1, sizeAttenuation: false, transparent: true, opacity: op, depthTest: false });
+  const mid = [], end = [];
+  paths.forEach(({ pts }) => {
+    const vs = pts.map(p => toV(p.en[0], p.en[1], 1.2)), arc = [];
+    for (let i = 1; i < vs.length; i++) {
+      const a = vs[i - 1], b = vs[i], m = a.clone().lerp(b, .5), d = a.distanceTo(b);
+      m.y += d > 25 ? d * 0.18 : d * 0.05;   // full swings arc, chips and putts stay low
+      arc.push(...new THREE.QuadraticBezierCurve3(a, m, b).getPoints(20));
+      (i === vs.length - 1 ? end : mid).push(b);
+    }
+    const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(arc), lmat); l.renderOrder = 7; group.add(l);
+  });
+  const px = Math.min(2, devicePixelRatio || 1);
+  if (mid.length) { const p = new THREE.Points(new THREE.BufferGeometry().setFromPoints(mid), dot('#ffe082', 9 * px, 0.85)); p.renderOrder = 8; group.add(p); }
+  if (end.length) { const p = new THREE.Points(new THREE.BufferGeometry().setFromPoints(end), dot('#ffffff', 9 * px, 0.9)); p.renderOrder = 8; group.add(p); }
+}
+
+/* ------------------------------------------------------------------ trace shots from a screenshot */
+function inPoly(p, poly) {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]) c = !c;
+  }
+  return c;
+}
+// similarity transform (scale + rotation + shift) from two matched points; image y points down
+function fit2(i1, i2, w1, w2) {
+  const za = [i1[0], -i1[1]], zb = [i2[0], -i2[1]];
+  const dz = [zb[0] - za[0], zb[1] - za[1]], dw = [w2[0] - w1[0], w2[1] - w1[1]];
+  const den = dz[0] * dz[0] + dz[1] * dz[1]; if (!den) return null;
+  const a = [(dw[0] * dz[0] + dw[1] * dz[1]) / den, (dw[1] * dz[0] - dw[0] * dz[1]) / den];
+  const b = [w1[0] - (a[0] * za[0] - a[1] * za[1]), w1[1] - (a[0] * za[1] + a[1] * za[0])];
+  return p => { const z = [p[0], -p[1]]; return [a[0] * z[0] - a[1] * z[1] + b[0], a[0] * z[1] + a[1] * z[0] + b[1]]; };
+}
+let tr = null;
+function openTrace(hole) {
+  const today = new Date().toISOString().slice(0, 10);
+  const tees = ['Black', 'Blue', 'Blue/White', 'White'];
+  const last = store.get('yb-trace-last', {});
+  openSheet(`<h3>Add shots from a screenshot</h3>
+    <p class="rm">In 18Birdies, open the round, go to the hole's shot view and take a screenshot. Pick it here, then tap the tee, the green and each spot your ball finished.</p>
+    <form id="trf" class="aform">
+      <div class="two"><label>Date played<input type="date" id="trDate" value="${last.date || today}" max="${today}"></label>
+      <label>Tees<select id="trTee">${tees.map(t => `<option ${t === (last.tee || YB.tee()) ? 'selected' : ''}>${t}</option>`).join('')}</select></label></div>
+      <label>Hole<select id="trHole">${YB.H.map(h => `<option value="${h.n}" ${h.n === hole ? 'selected' : ''}>${h.n} · par ${h.par}</option>`).join('')}</select></label>
+      <label class="rb main impfile" style="text-align:center">Choose screenshot<input type="file" id="trFile" accept="image/*" hidden></label>
+    </form>`);
+  $('trFile').onchange = e => {
+    const f = e.target.files[0]; if (!f) return;
+    const img = new Image();
+    img.onload = () => {
+      tr = { img, hole: +$('trHole').value, date: $('trDate').value, tee: $('trTee').value, taps: [], clubs: [] };
+      store.set('yb-trace-last', { date: tr.date, tee: tr.tee });
+      traceScreen();
+    };
+    img.src = URL.createObjectURL(f);
+  };
+}
+function traceScreen() {
+  openSheet(`<h3 id="trTitle">Hole ${tr.hole}</h3>
+    <p class="rm" id="trHint"></p>
+    <div class="trwrap"><canvas id="trCan"></canvas></div>
+    <div class="rbtns"><button class="rb ghost" id="trUndo">Undo</button><button class="rb main" id="trDone" disabled>Next</button></div>`);
+  document.querySelector('.rsheet') && document.querySelector('.rsheet').classList.add('wide');
+  const can = $('trCan'), img = tr.img;
+  const maxW = Math.min(can.parentElement.clientWidth || 360, 600), maxH = Math.max(320, innerHeight * 0.62);
+  const k = Math.min(maxW / img.width, maxH / img.height);
+  const dpr = devicePixelRatio || 1;
+  can.style.width = img.width * k + 'px'; can.style.height = img.height * k + 'px';
+  can.width = Math.round(img.width * k * dpr); can.height = Math.round(img.height * k * dpr);
+  const ctx = can.getContext('2d');
+  const draw = () => {
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(img, 0, 0, can.width, can.height);
+    const sc = can.width / img.width, P = t => [t[0] * sc, t[1] * sc];
+    ctx.lineWidth = 2.5 * dpr;
+    if (tr.taps.length > 2) { ctx.strokeStyle = '#ffd23f'; ctx.beginPath(); [tr.taps[0]].concat(tr.taps.slice(2)).forEach((t, i) => { const p = P(t); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }); ctx.stroke(); }
+    tr.taps.forEach((t, i) => {
+      const p = P(t), lab = i === 0 ? 'T' : i === 1 ? 'G' : String(i - 1);
+      ctx.fillStyle = i === 0 ? '#ffffff' : i === 1 ? '#d23b2a' : '#ffd23f'; ctx.strokeStyle = '#14241d';
+      ctx.beginPath(); ctx.arc(p[0], p[1], 9 * dpr, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = i === 1 ? '#fff' : '#14241d'; ctx.font = `700 ${11 * dpr}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(lab, p[0], p[1] + .5);
+    });
+    const n = tr.taps.length;
+    $('trHint').innerHTML = n === 0 ? '<b>1.</b> Tap the <b>tee</b> (where your first shot started).'
+      : n === 1 ? '<b>2.</b> Tap the <b>middle of the green</b>.'
+      : `<b>3.</b> Tap where <b>shot ${n - 1}</b> finished, in order. ${n > 2 ? 'Tap <b>Next</b> after the last one.' : ''}`;
+    $('trDone').disabled = n < 3; $('trUndo').disabled = !n;
+  };
+  can.onclick = ev => {
+    const r = can.getBoundingClientRect();
+    tr.taps.push([(ev.clientX - r.left) / r.width * img.width, (ev.clientY - r.top) / r.height * img.height]);
+    if (tr.taps.length > 14) tr.taps.length = 14;
+    draw();
+  };
+  $('trUndo').onclick = () => { tr.taps.pop(); draw(); };
+  $('trDone').onclick = traceReview;
+  draw();
+}
+function traceShots() {
+  const h = YB.H[tr.hole - 1], g = YB.geom(h, tr.tee);
+  const f = fit2(tr.taps[0], tr.taps[1], g.tee, g.gc); if (!f) return null;
+  const ends = tr.taps.slice(2).map(f);
+  return { g, pts: [g.tee].concat(ends) };   // shot i starts at pts[i]
+}
+function traceReview() {
+  const res = traceShots(); if (!res) { toast('Tap the tee and green in different spots'); return; }
+  const { g, pts } = res, n = pts.length - 1;
+  const onGreen = g.poly && inPoly(pts[n], g.poly);
+  const len = distYd(g.tee, g.gc);
+  const clubs = bag && bag.length ? bag : ['Driver', '3W', '5W', 'Hybrid', '4i', '5i', '6i', '7i', '8i', '9i', 'PW', 'GW', 'SW', 'LW', 'Putter'];
+  openSheet(`<h3>Hole ${tr.hole} · ${n} shot${n === 1 ? '' : 's'}</h3>
+    <p class="rm">${onGreen ? 'Last ball finished on the green.' : 'Last ball finished off the green (chip-in or a hole you picked up on).'} Add clubs if you know them; they're optional.</p>
+    <div class="trlist">${pts.slice(0, n).map((p, i) => `<div class="trrow"><span>Shot ${i + 1}</span><b>${distYd(p, pts[i + 1])} yd</b><select data-c="${i}"><option value="">Club</option>${clubs.map(c => `<option ${tr.clubs[i] === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>`).join('')}</div>
+    <p class="rm">${tr.tee} tee to green: ${len} yd. If the distances look off, go back and redo the tee and green taps.</p>
+    <div class="rbtns"><button class="rb ghost" id="trBack">Back</button><button class="rb main" id="trSave">Save shots</button></div>`);
+  document.querySelectorAll('[data-c]').forEach(s => s.onchange = () => { tr.clubs[+s.dataset.c] = s.value || null; });
+  $('trBack').onclick = traceScreen;
+  $('trSave').onclick = () => saveTrace(pts, onGreen);
+}
+function saveTrace(pts, onGreen) {
+  const day = tr.date || new Date().toISOString().slice(0, 10), when = new Date(day + 'T12:00:00').toISOString();
+  // one traced round per date and tee; re-tracing a hole replaces it
+  let r = data.rounds.find(x => isImported(x) && x.course === COURSE_ID && x.started_at.slice(0, 10) === when.slice(0, 10) && x.tee === tr.tee);
+  if (!r) { r = { id: uuid(), course: COURSE_ID, tee: tr.tee, started_at: when, ended_at: when, status: 'imported', weather: null }; upsertRound(r); }
+  roundShots(r.id, tr.hole).forEach(removeShot);
+  pts.forEach((en, i) => {
+    const ll = G.toLL(en[0], en[1]), last = i === pts.length - 1;
+    addShot({ id: uuid(), round_id: r.id, hole: tr.hole, seq: i + 1, kind: last ? (onGreen ? 'ongreen' : 'end') : 'shot', club: last ? null : (tr.clubs[i] || null),
+      lat: +ll[0].toFixed(7), lon: +ll[1].toFixed(7), accuracy: null, source: '18birdies', taken_at: when, weather: null });
+  });
+  const hole = tr.hole; tr = null; closeSheet();
+  pastOff.delete(hole); store.set(LS_PASTOFF, [...pastOff]);
+  if (YB.cur() !== hole) location.hash = 'hole-' + hole; else YB.refresh();
+  renderPastBtn(); render();
+  toast(`Saved ${pts.length - 1} shots on hole ${hole}`);
 }
 
 /* ------------------------------------------------------------------ sync (Supabase) */
@@ -774,6 +973,16 @@ function renderProfile() {
   </div>
   <p class="small">This is an unofficial index calculated with the World Handicap System rules (2024 revision). It doesn't apply Playing Conditions Calculation, and the expected score used for 9-hole and partial rounds is a close approximation of the USGA's formula. An official Handicap Index comes from your golf association through GHIN.</p>`;
   $('pfOffSave').onclick = () => { const v = $('pfOff').value.trim().replace('+', '-'); profile.official_index = v === '' ? null : (isNaN(+v) ? profile.official_index : Math.max(-10, Math.min(54, +v))); saveProfileLocal(); render(); toast('Saved'); };
+  // traced shot rounds (from screenshots)
+  const traced = data.rounds.filter(x => x.course === COURSE_ID && isImported(x)).sort((a, b) => b.started_at.localeCompare(a.started_at));
+  const ownShots = data.rounds.filter(x => x.course === COURSE_ID && !isImported(x)).reduce((t, x) => t + new Set(roundShots(x.id).map(s => s.hole)).size, 0);
+  el.insertAdjacentHTML('beforeend', `<div class="box" style="margin-top:12px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">Shot history</h2><button class="rb" id="pfTrace">Add shots from a screenshot</button></div>
+    <p class="rm">Past shots show faintly on each hole you've played. Use <b>Past shots</b> on the hole view to hide them for that hole.${ownShots ? ` ${ownShots} hole${ownShots === 1 ? '' : 's'} tracked with this app.` : ''}</p>
+    ${traced.length ? `<table class="pt"><tbody>${traced.map(x => { const holes = [...new Set(roundShots(x.id).map(s => s.hole))].sort((a, b) => a - b); return `<tr><td>${new Date(x.started_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit', timeZone: 'UTC' })}</td><td>${esc(x.tee || '')}<small> · from screenshots</small></td><td><small>${holes.length ? 'holes ' + holes.join(', ') : 'no shots'}</small></td><td><button class="rb ghost" data-deltr="${x.id}" style="min-height:34px;padding:6px 10px">Delete</button></td></tr>`; }).join('')}</tbody></table>` : ''}</div>`);
+  $('pfTrace').onclick = () => openTrace(1);
+  el.querySelectorAll('[data-deltr]').forEach(b => b.onclick = () => { const x = data.rounds.find(y => y.id === b.dataset.deltr); if (!x) return;
+    openSheet(`<h3>Delete these traced shots?</h3><p class="rm">Removes every shot traced for this date.</p><div class="rbtns"><button class="rb" id="dtYes" style="background:var(--flag);color:#fff;border-color:var(--flag)">Delete</button><button class="rb ghost" id="dtNo">Cancel</button></div>`);
+    $('dtYes').onclick = () => { deleteRound(x); closeSheet(); render(); YB.refresh(); }; $('dtNo').onclick = closeSheet; });
   $('pfAdd').onclick = openAddScore;
   $('pfImport').onclick = openImport;
   if ($('pfUndoImp')) $('pfUndoImp').onclick = e => { e.preventDefault(); openSheet(`<h3>Undo last import?</h3><p class="rm">Removes the ${store.get(LS_LASTIMPORT, []).length} scores from your last import${sync.user ? ', including from your account' : ''}.</p><div class="rbtns"><button class="rb" id="uiYes" style="background:var(--flag);color:#fff;border-color:var(--flag)">Remove them</button><button class="rb ghost" id="uiNo">Cancel</button></div>`); $('uiYes').onclick = () => { closeSheet(); undoLastImport(); }; $('uiNo').onclick = closeSheet; };
@@ -1163,13 +1372,13 @@ function undoLastImport() {
 }
 
 /* ------------------------------------------------------------------ wiring */
-function render() { hcCache = null; renderAcct(); renderBar(); renderMyCard(); renderProfile(); }
+function render() { hcCache = null; renderAcct(); renderBar(); renderMyCard(); renderProfile(); renderPastBtn(); }
 function boot() {
   if (!window.YB) return setTimeout(boot, 50);
   G = geoFns();
   ensureChrome();
-  YB.hooks.draw2d = draw2dOverlay;
-  YB.hooks.build3d = build3dOverlay;
+  YB.hooks.draw2d = (ctx, toScr, dpr) => { drawPast2d(ctx, toScr, dpr); draw2dOverlay(ctx, toScr, dpr); };
+  YB.hooks.build3d = (g, THREE, toV) => { buildPast3d(g, THREE, toV); build3dOverlay(g, THREE, toV); };
   YB.hooks.tap = (e, n) => {
     if (!pending) return false;
     const p = pending; pending = null;
