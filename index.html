@@ -24,6 +24,7 @@
   color-scheme:light;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{margin:0;height:100%}
 body{background:var(--paper);color:var(--ink);font:16px/1.45 var(--body);-webkit-font-smoothing:antialiased}
 button{font:inherit;color:inherit}
@@ -181,7 +182,7 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
   </section>
 
   <section class="box cardview" id="cardView" hidden>
-    <h2>Scorecard</h2>
+    <h2>Course scorecard</h2>
     <table class="sc" id="sc"></table>
     <p class="small">Tap a hole to open it. Ratings / slope: Black 72.1 / 137 · Blue 70.0 / 128 · Blue/White 68.3 / 126 · White 66.6 / 119.</p>
   </section>
@@ -192,6 +193,8 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
   </footer>
 </div>
 
+<script src="config.js"></script>
+<script src="round.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/utils/BufferGeometryUtils.js"></script>
@@ -377,6 +380,7 @@ function draw2d(){
   ctx.fillStyle='#d23b2a';ctx.beginPath();ctx.moveTo(gx[0],gx[1]-26*dpr);ctx.lineTo(gx[0]+14*dpr,gx[1]-21*dpr);ctx.lineTo(gx[0],gx[1]-16*dpr);ctx.closePath();ctx.fill();
   label([gx[0],gx[1]+16*dpr],String(h.yards[tee]),'#d23b2a','#fff',14);
   if(tap2){const xy=toScr(tap2);ctx.strokeStyle='#fff';ctx.lineWidth=2*dpr;ctx.setLineDash([5*dpr,4*dpr]);ctx.beginPath();ctx.moveTo(xy[0],xy[1]);ctx.lineTo(gx[0],gx[1]);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#ffd23f';ctx.beginPath();ctx.arc(xy[0],xy[1],6*dpr,0,7);ctx.fill();ctx.stroke()}
+  if(YB.hooks.draw2d) try{ YB.hooks.draw2d(ctx,toScr,dpr); }catch(e){ console.warn(e); }
   // north arrow
   ctx.save();ctx.translate(26*dpr,c2.height-30*dpr);ctx.rotate(phi);ctx.fillStyle='rgba(255,255,255,.9)';ctx.beginPath();ctx.moveTo(0,-12*dpr);ctx.lineTo(6*dpr,8*dpr);ctx.lineTo(0,4*dpr);ctx.lineTo(-6*dpr,8*dpr);ctx.closePath();ctx.fill();ctx.restore();
   ctx.font=`600 ${11*dpr}px "Barlow",sans-serif`;ctx.fillStyle='#fff';ctx.textAlign='center';ctx.fillText('N',26*dpr,c2.height-6*dpr);
@@ -387,6 +391,7 @@ c2.addEventListener('click',ev=>{
   const sx=(ev.clientX-r.left)*M.dpr-M.W/2, sy=(ev.clientY-r.top)*M.dpr-M.H/2-8*M.dpr;
   const x=sx/M.s, y=sy/M.s; const cp=Math.cos(-M.phi), sp=Math.sin(-M.phi);
   const qx=x*cp-y*sp, qy=x*sp+y*cp; const e=qx+M.c[0], n=-qy+M.c[1];
+  if(YB.hooks.tap&&YB.hooks.tap(e,n)) return;
   tap2=[e,n]; showTap(e,n); draw2d();
 });
 
@@ -434,7 +439,9 @@ function init3d(objs){
   let down=null;
   canvas.addEventListener('pointerdown',e=>{down=[e.clientX,e.clientY,performance.now()]; st.anim=null;});
   canvas.addEventListener('pointerup',e=>{ if(!down) return; const d=Math.hypot(e.clientX-down[0],e.clientY-down[1]); if(d<6&&performance.now()-down[2]<500) pick3d(e); down=null;});
-  (function loop(){requestAnimationFrame(loop); if(view!=='3d') return; if(st.anim) st.anim(); controls.update(); renderer.render(scene,camera);})();
+  st.dirty=true; controls.addEventListener('change',()=>{st.dirty=true;});
+  // draw only when something changed: saves battery during a round
+  (function loop(){requestAnimationFrame(loop); if(view!=='3d'||document.hidden) return; if(st.anim){st.anim(); st.dirty=true;} controls.update(); if(st.dirty){ st.dirty=false; renderer.render(scene,camera);} })();
 }
 function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
 function buildObjects(){
@@ -511,7 +518,7 @@ function textSprite(txt,bg,fg,h=7){ h=h*0.0052;
   s.scale.set(h*c.width/c.height,h,1); s.renderOrder=10; return s;
 }
 function buildHole3d(){
-  if(!three) return; const st=three, g=st.holeGroup;
+  if(!three) return; const st=three, g=st.holeGroup; st.dirty=true;
   while(g.children.length){const o=g.children.pop(); o.traverse(x=>{if(x.geometry)x.geometry.dispose(); if(x.material){if(x.material.map)x.material.map.dispose(); x.material.dispose()}})}
   const h=H[cur-1]; const {pts,tee:t,gc}=holeGeom(h); const tot=polyLen(pts);
   fitShadow(pts,tot);
@@ -534,6 +541,7 @@ function buildHole3d(){
   h.hazards.filter(z=>z.carry-sh>20&&!z.ng).forEach(z=>{const s=textSprite(String(z.carry-sh),z.kind==='water'?'#3a7ca5':'#c9a45c','#ffffff',5.5); s.position.copy(toV(z.c[0],z.c[1],6)); g.add(s);});
   const ps=textSprite(String(h.yards[tee]),'#d23b2a','#ffffff',7); ps.position.copy(base).add(new THREE.Vector3(0,13,0)); g.add(ps);
   if(st.tapMarker){ g.add(st.tapMarker.group); }
+  if(YB.hooks.build3d) try{ YB.hooks.build3d(g,THREE,toV); }catch(e){ console.warn(e); }
 }
 function fitShadow(pts,tot){
   const st=three, mid=pointAlong(pts,tot/2), half=tot/2+170;
@@ -582,6 +590,7 @@ function pick3d(ev){
   const o=rc.ray.origin.clone(), dvec=rc.ray.direction; let tprev=0, hit=null;
   for(let t=1;t<4000;t+=Math.max(0.5,t*0.004)){ const q=o.clone().addScaledVector(dvec,t); if(q.y<=hAt(q.x,-q.z)*st.exag){ let a=tprev,b=t; for(let k=0;k<20;k++){const mid=(a+b)/2, r=o.clone().addScaledVector(dvec,mid); if(r.y<=hAt(r.x,-r.z)*st.exag) b=mid; else a=mid;} hit=o.clone().addScaledVector(dvec,b); break;} tprev=t; }
   if(!hit) return; const e=hit.x, n=-hit.z;
+  if(YB.hooks.tap&&YB.hooks.tap(e,n)) return;
   if(st.tapMarker){st.holeGroup.remove(st.tapMarker.group); st.tapMarker.group.traverse(x=>{if(x.geometry)x.geometry.dispose(); if(x.material)x.material.dispose()})}
   const grp=new THREE.Group(); const h=H[cur-1]; const g=h.green.c;
   const a=toV(e,n,1), b=toV(g[0],g[1],1);
@@ -590,10 +599,10 @@ function pick3d(ev){
   grp.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(arc.getPoints(40)),new THREE.LineDashedMaterial({color:'#ffd23f',dashSize:3,gapSize:2})));
   grp.children[0].computeLineDistances();
   const dot=new THREE.Mesh(new THREE.SphereGeometry(3,16,12),new THREE.MeshBasicMaterial({color:'#ffd23f',depthTest:false})); dot.renderOrder=9; dot.position.copy(a); grp.add(dot);
-  st.tapMarker={group:grp}; st.holeGroup.add(grp);
+  st.tapMarker={group:grp}; st.holeGroup.add(grp); st.dirty=true;
   showTap(e,n);
 }
-function resize3d(){ if(!three) return; const r=$('stage').getBoundingClientRect(); three.renderer.setSize(r.width,r.height,false); three.camera.aspect=r.width/r.height; three.camera.updateProjectionMatrix(); }
+function resize3d(){ if(!three) return; three.dirty=true; const r=$('stage').getBoundingClientRect(); three.renderer.setSize(r.width,r.height,false); three.camera.aspect=r.width/r.height; three.camera.updateProjectionMatrix(); }
 
 $('exag').onclick=()=>{const seq=[1,1.5,2]; const st=three; st.exag=seq[(seq.indexOf(st.exag)+1)%seq.length]; store.set('crown-exag2',st.exag); applyExag(); teeView(false);};
 $('greenv').onclick=()=>greenView();
@@ -604,7 +613,7 @@ function setView(v){
   $('l3d').hidden=v!=='3d'; $('l2d').hidden=v!=='2d'; $('tools3d').style.visibility=v==='3d'?'visible':'hidden';
   if(v==='2d') draw2d();
 }
-$('v3d').onclick=()=>{ if(three) setView('3d') }; $('v2d').onclick=()=>setView('2d');
+$('v3d').onclick=()=>{ if(three){ setView('3d'); three.dirty=true; } }; $('v2d').onclick=()=>setView('2d');
 new ResizeObserver(()=>{if(view==='2d')draw2d()}).observe($('stage'));
 
 /* ---------- routing ---------- */
@@ -624,6 +633,9 @@ function route(){
 window.addEventListener('hashchange',route);
 
 renderTees(); renderCard();
+window.YB={H,course,hooks:{},cur:()=>cur,tee:()=>tee,
+  refresh(){ if(three) buildHole3d(); if(view==='2d') draw2d(); },
+  refresh2d(){ if(view==='2d') draw2d(); }};
 await aerialReady;
 let objs={trees:[],buildings:[]}; try{ objs=await objectsP; }catch(e){}
 try{ init3d(objs); }catch(err){ console.warn(err); $('v3d').disabled=true; setView('2d'); $('tapinfo').innerHTML='<div><span>3D needs WebGL, so this shows the hole map</span></div>'; }

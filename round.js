@@ -1,0 +1,569 @@
+/* Yardage Book: rounds, GPS distances, one-tap shot tracking, scorecard, accounts.
+   Local-first: everything saves on the device immediately; when signed in, changes
+   are queued and synced to Supabase (and pulled back on other devices). */
+(function () {
+'use strict';
+const YD = 1.0936133;
+const COURSE_ID = 'crown';
+const DEFAULT_BAG = ['Driver', '3W', '5W', 'Hybrid', '4i', '5i', '6i', '7i', '8i', '9i', 'PW', 'GW', 'SW', 'LW'];
+const LS_DATA = 'yb-data-v1', LS_OUTBOX = 'yb-outbox-v1', LS_BAG = 'yb-bag-v1', LS_MERGED = 'yb-merged-user';
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+};
+const uuid = () => (crypto.randomUUID ? crypto.randomUUID() :
+  'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
+const nowIso = () => new Date().toISOString();
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* ------------------------------------------------------------------ data */
+let data = store.get(LS_DATA, { rounds: [], scores: [], shots: [] });
+let outbox = store.get(LS_OUTBOX, []);
+let bag = store.get(LS_BAG, DEFAULT_BAG.slice());
+const save = () => store.set(LS_DATA, data);
+
+function queue(table, op, row) {
+  outbox.push({ table, op, row });
+  store.set(LS_OUTBOX, outbox);
+  sync.flushSoon();
+}
+const activeRound = () => data.rounds.find(r => r.status === 'active' && r.course === COURSE_ID) || null;
+const roundShots = (rid, hole) => data.shots.filter(s => s.round_id === rid && (hole == null || s.hole === hole)).sort((a, b) => a.seq - b.seq);
+const holeScore = (rid, hole) => data.scores.find(s => s.round_id === rid && s.hole === hole) || null;
+
+function upsertRound(r) { r.updated_at = nowIso(); const i = data.rounds.findIndex(x => x.id === r.id); if (i < 0) data.rounds.push(r); else data.rounds[i] = r; save(); queue('rounds', 'upsert', r); }
+function upsertScore(s) {
+  s.updated_at = nowIso();
+  const i = data.scores.findIndex(x => x.round_id === s.round_id && x.hole === s.hole);
+  if (i < 0) data.scores.push(s); else data.scores[i] = s;
+  save(); queue('hole_scores', 'upsert', s);
+}
+function addShot(s) { s.updated_at = nowIso(); data.shots.push(s); save(); queue('shots', 'upsert', s); }
+function updateShot(s) { s.updated_at = nowIso(); save(); queue('shots', 'upsert', s); }
+function removeShot(s) { data.shots = data.shots.filter(x => x.id !== s.id); save(); queue('shots', 'delete', { id: s.id }); }
+function deleteRound(r) {
+  data.rounds = data.rounds.filter(x => x.id !== r.id);
+  data.scores = data.scores.filter(x => x.round_id !== r.id);
+  data.shots = data.shots.filter(x => x.round_id !== r.id);
+  save(); queue('rounds', 'delete', { id: r.id });
+}
+
+/* ------------------------------------------------------------------ geo */
+function geoFns() {
+  const [LAT0, LON0] = YB.course.origin || [44.7255, -85.6875];
+  const R = 6378137, KX = R * Math.cos(LAT0 * Math.PI / 180) * Math.PI / 180, KY = R * Math.PI / 180;
+  return {
+    toEN: (lat, lon) => [(lon - LON0) * KX, (lat - LAT0) * KY],
+    toLL: (e, n) => [LAT0 + n / KY, LON0 + e / KX]
+  };
+}
+let G = null;
+const distYd = (a, b) => Math.round(Math.hypot(a[0] - b[0], a[1] - b[1]) * YD);
+function greenFCB(h, from) {
+  // front/back = nearest/farthest green edge along the line from the player to the green centre
+  const c = h.green.c, d = [c[0] - from[0], c[1] - from[1]], L = Math.hypot(d[0], d[1]) || 1, u = [d[0] / L, d[1] / L];
+  let lo = Infinity, hi = -Infinity;
+  for (const p of h.green.poly) {
+    const s = (p[0] - from[0]) * u[0] + (p[1] - from[1]) * u[1];
+    const off = Math.abs(-(p[0] - from[0]) * u[1] + (p[1] - from[1]) * u[0]);
+    if (off < 6) { lo = Math.min(lo, s); hi = Math.max(hi, s); }
+  }
+  if (!isFinite(lo)) { lo = L - h.green.depth / 2 / YD; hi = L + h.green.depth / 2 / YD; }
+  return { f: Math.round(lo * YD), c: Math.round(L * YD), b: Math.round(hi * YD) };
+}
+
+/* ------------------------------------------------------------------ GPS */
+const gps = { fix: null, watch: null, err: null };
+function startGPS() {
+  if (gps.watch != null || !navigator.geolocation) return;
+  gps.watch = navigator.geolocation.watchPosition(p => {
+    gps.err = null;
+    gps.fix = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy, t: Date.now() };
+    renderBar();
+  }, e => { gps.err = e.code === 1 ? 'denied' : 'unavailable'; renderBar(); },
+  { enableHighAccuracy: true, maximumAge: 3000, timeout: 20000 });
+}
+function stopGPS() { if (gps.watch != null) navigator.geolocation.clearWatch(gps.watch); gps.watch = null; }
+function fixEN() {
+  if (!gps.fix || Date.now() - gps.fix.t > 60000) return null;
+  const en = G.toEN(gps.fix.lat, gps.fix.lon);
+  // only trust it on/near the property
+  if (Math.abs(en[0]) > 1200 || Math.abs(en[1]) > 1200) return null;
+  return en;
+}
+const awayFromCourse = () => gps.fix && !fixEN();
+
+/* ------------------------------------------------------------------ weather (Open-Meteo, free, no key) */
+async function fetchWeather() {
+  try {
+    const [lat, lon] = G.toLL(0, 0);
+    const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,precipitation&temperature_unit=fahrenheit&wind_speed_unit=mph`);
+    const j = await r.json();
+    const c = j.current;
+    return { temp_f: c.temperature_2m, wind_mph: c.wind_speed_10m, wind_dir: c.wind_direction_10m, gust_mph: c.wind_gusts_10m, precip_in: c.precipitation, at: c.time };
+  } catch (e) { return null; }
+}
+
+/* ------------------------------------------------------------------ round flow */
+async function startRound() {
+  const r = { id: uuid(), course: COURSE_ID, tee: YB.tee(), started_at: nowIso(), ended_at: null, status: 'active', weather: null };
+  upsertRound(r);
+  startGPS();
+  location.hash = 'hole-1';
+  render();
+  const w = await fetchWeather();
+  if (w) { r.weather = w; upsertRound(r); renderBar(); }
+}
+function endRound() {
+  const r = activeRound(); if (!r) return;
+  r.status = 'done'; r.ended_at = nowIso(); upsertRound(r);
+  stopGPS(); location.hash = 'card'; render();
+}
+function lastPlayedHole(r) {
+  const holes = new Set(roundShots(r.id).map(s => s.hole).concat(data.scores.filter(s => s.round_id === r.id && s.score != null).map(s => s.hole)));
+  return holes.size ? Math.max(...holes) : 0;
+}
+
+let pending = null;   // {club} waiting for a tap on the map
+function recordShot(club, en, src) {
+  const r = activeRound(); if (!r) return;
+  const hole = YB.cur();
+  const shots = roundShots(r.id, hole);
+  const [lat, lon] = G.toLL(en[0], en[1]);
+  addShot({ id: uuid(), round_id: r.id, hole, seq: (shots.length ? shots[shots.length - 1].seq : 0) + 1, kind: 'shot', club,
+    lat, lon, accuracy: src === 'gps' && gps.fix ? Math.round(gps.fix.acc) : null, source: src, taken_at: nowIso(), weather: null });
+  if (club && bag.includes(club)) { lastClub[hole] = club; }
+  toast(`${club} marked · shot ${shots.length + 1}`);
+  YB.refresh();
+  render();
+}
+const lastClub = {};
+function hit(club) {
+  closeSheet();
+  const en = fixEN();
+  if (en) recordShot(club, en, 'gps');
+  else { pending = { club, kind: 'shot' }; renderBar(); toast('Tap where the ball is on the map'); }
+}
+function penalty() {
+  const r = activeRound(); if (!r) return;
+  const hole = YB.cur(), shots = roundShots(r.id, hole);
+  addShot({ id: uuid(), round_id: r.id, hole, seq: (shots.length ? shots[shots.length - 1].seq : 0) + 1, kind: 'penalty', club: null,
+    lat: null, lon: null, accuracy: null, source: null, taken_at: nowIso(), weather: null });
+  toast('Penalty stroke added'); YB.refresh(); render();
+}
+function undo() {
+  const r = activeRound(); if (!r) return;
+  const shots = roundShots(r.id, YB.cur()); if (!shots.length) return;
+  removeShot(shots[shots.length - 1]); toast('Removed last entry'); YB.refresh(); render();
+}
+function onGreen() {
+  // records where the ball finished on the green (end of the last full shot), then asks for putts
+  const r = activeRound(); if (!r) return;
+  const hole = YB.cur(), h = YB.H[hole - 1];
+  const en = fixEN();
+  const place = (pt, src) => {
+    const shots = roundShots(r.id, hole);
+    const prev = shots.filter(s => s.kind === 'ongreen'); prev.forEach(removeShot);
+    const [lat, lon] = G.toLL(pt[0], pt[1]);
+    addShot({ id: uuid(), round_id: r.id, hole, seq: (shots.length ? shots[shots.length - 1].seq : 0) + 1, kind: 'ongreen', club: null,
+      lat, lon, accuracy: src === 'gps' && gps.fix ? Math.round(gps.fix.acc) : null, source: src, taken_at: nowIso(), weather: null });
+    YB.refresh(); openPutts();
+  };
+  if (en) place(en, 'gps');
+  else { pending = { kind: 'ongreen', place }; renderBar(); toast('Tap where the ball is on the green, or skip'); openSheet(`<h3>On the green</h3><p class="rm">No GPS fix here, so tap the ball's spot on the green.</p><div class="rbtns"><button class="rb" id="ogCenter">Use green center</button><button class="rb ghost" id="ogSkip">Skip, just enter putts</button></div>`);
+    $('ogCenter').onclick = () => { pending = null; place(h.green.c, 'map'); };
+    $('ogSkip').onclick = () => { pending = null; openPutts(); };
+  }
+}
+function openPutts() {
+  const r = activeRound(), hole = YB.cur();
+  openSheet(`<h3>Hole ${hole} · putts</h3><div class="rgrid">${[0, 1, 2, 3, 4].map(n => `<button class="rb big" data-p="${n}">${n}</button>`).join('')}</div>`);
+  document.querySelectorAll('[data-p]').forEach(b => b.onclick = () => {
+    const putts = +b.dataset.p;
+    const shots = roundShots(r.id, hole);
+    const strokes = shots.filter(s => s.kind === 'shot').length, pens = shots.filter(s => s.kind === 'penalty').length;
+    const sc = holeScore(r.id, hole) || { round_id: r.id, hole, score: null, putts: null, fairway: null, penalties: 0 };
+    sc.putts = putts; sc.penalties = pens;
+    if (strokes) sc.score = strokes + pens + putts;
+    upsertScore(sc);
+    openScoreSheet(hole, true);
+  });
+}
+
+/* ------------------------------------------------------------------ scorecard entry */
+function stepper(id, label, val, min, max) {
+  return `<div class="stp"><span>${label}</span><button class="rb sq" data-s="${id}" data-d="-1" aria-label="${label} minus">−</button><b id="sv-${id}">${val == null ? '–' : val}</b><button class="rb sq" data-s="${id}" data-d="1" aria-label="${label} plus">+</button></div>`;
+}
+function openScoreSheet(hole, fromFlow) {
+  const r = activeRound() || viewRound();
+  if (!r) return;
+  const h = YB.H[hole - 1];
+  const sc = holeScore(r.id, hole) || { round_id: r.id, hole, score: null, putts: null, fairway: null, penalties: 0 };
+  const shots = roundShots(r.id, hole);
+  const st = { score: sc.score ?? (shots.filter(s => s.kind !== 'ongreen').length ? shots.filter(s => s.kind !== 'ongreen').length + (sc.putts || 0) : h.par), putts: sc.putts ?? 2, penalties: sc.penalties || 0, fairway: sc.fairway };
+  const fw = h.par >= 4 ? `<div class="stp"><span>Fairway</span><div class="seg3">${['left', 'hit', 'right'].map(f => `<button class="rb fw" data-fw="${f}" aria-pressed="${st.fairway === f}">${f === 'hit' ? 'Hit' : f === 'left' ? '← Left' : 'Right →'}</button>`).join('')}</div></div>` : '';
+  openSheet(`<h3>Hole ${hole} · par ${h.par}</h3>
+    ${stepper('score', 'Score', st.score, 1, 15)}${stepper('putts', 'Putts', st.putts, 0, 6)}${stepper('penalties', 'Penalties', st.penalties, 0, 6)}${fw}
+    <p class="rm" id="relpar"></p>
+    <div class="rbtns"><button class="rb" id="scSave">${fromFlow && hole < 18 ? `Save · go to ${hole + 1}` : 'Save'}</button></div>`);
+  const upd = () => { const d = st.score - h.par; $('relpar').textContent = d === 0 ? 'Par' : d === -1 ? 'Birdie' : d === -2 ? 'Eagle' : d === 1 ? 'Bogey' : d === 2 ? 'Double bogey' : (d > 0 ? '+' + d : d); };
+  upd();
+  document.querySelectorAll('[data-s]').forEach(b => b.onclick = () => {
+    const k = b.dataset.s, lim = { score: [1, 15], putts: [0, 6], penalties: [0, 6] }[k];
+    st[k] = Math.max(lim[0], Math.min(lim[1], (st[k] ?? 0) + +b.dataset.d)); $('sv-' + k).textContent = st[k]; upd();
+  });
+  document.querySelectorAll('[data-fw]').forEach(b => b.onclick = () => {
+    st.fairway = st.fairway === b.dataset.fw ? null : b.dataset.fw;
+    document.querySelectorAll('[data-fw]').forEach(x => x.setAttribute('aria-pressed', x.dataset.fw === st.fairway));
+  });
+  $('scSave').onclick = () => {
+    upsertScore(Object.assign(sc, { score: st.score, putts: st.putts, penalties: st.penalties, fairway: h.par >= 4 ? st.fairway : null }));
+    closeSheet();
+    if (fromFlow && hole < 18 && activeRound()) location.hash = 'hole-' + (hole + 1);
+    render();
+  };
+}
+
+/* ------------------------------------------------------------------ UI: sheet, toast, bar */
+function ensureChrome() {
+  if ($('rSheet')) return;
+  const css = document.createElement('style');
+  css.textContent = `
+  .rbar{position:absolute;left:8px;right:8px;bottom:8px;z-index:3;background:rgba(249,250,246,.97);color:var(--ink);border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.22);padding:10px;display:grid;gap:8px}
+  .rbar .dist{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;font-variant-numeric:tabular-nums}
+  .rbar .fcb{display:flex;gap:10px;align-items:baseline;flex-wrap:nowrap}
+  .rbar .fcb span{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin-right:3px}
+  .rbar .fcb b{font:700 22px/1 var(--display)} .rbar .fcb b.c{font-size:34px;color:var(--flag)}
+  .rbar .meta{font-size:12px;color:var(--muted);text-align:right;line-height:1.3;white-space:nowrap}
+  .rbar .acts{display:grid;grid-template-columns:1.4fr 1.3fr 1.2fr 1fr 1.2fr;gap:5px}.rbar .acts .rb{padding:8px 4px;font-size:14px}.rbar .acts .rb.main{font-size:17px}
+  .rb{border:1px solid var(--rule);background:var(--card);border-radius:10px;padding:10px 8px;font:600 15px/1 var(--display);letter-spacing:.04em;text-transform:uppercase;cursor:pointer;color:var(--ink);min-height:44px}
+  .rb.main{background:var(--pine);border-color:var(--pine);color:#fff;font-size:17px}
+  .rb.ghost{background:transparent}
+  .rb.big{font-size:24px;min-height:60px}
+  .rb.sq{width:44px;padding:0;font-size:22px}
+  .rb[aria-pressed="true"]{background:var(--ink);color:var(--card);border-color:var(--ink)}
+  .rb:disabled{opacity:.45}
+  .rpend{background:#fff4d6;border:1px solid #e3c46a;border-radius:10px;padding:8px 10px;font-size:14px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .rsheet-bg{position:fixed;inset:0;background:rgba(10,20,15,.35);z-index:40}
+  .rsheet{position:fixed;left:0;right:0;bottom:0;z-index:41;background:var(--card);border-radius:18px 18px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom));max-height:80svh;overflow:auto;box-shadow:0 -8px 30px rgba(0,0,0,.25);max-width:560px;margin:0 auto}
+  .rsheet h3{font:700 22px/1.1 var(--display);margin:0 0 12px;letter-spacing:.02em}
+  .rsheet .close{position:absolute;right:10px;top:10px;border:0;background:transparent;font-size:26px;line-height:1;cursor:pointer;color:var(--muted);width:44px;height:44px}
+  .rgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px}
+  .rgrid .rb{min-height:56px;font-size:18px}
+  .rgrid .rb.last{outline:2px solid var(--flag);outline-offset:1px}
+  .rbtns{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}.rbtns .rb{flex:1}
+  .rm{color:var(--muted);font-size:14px;margin:6px 0}
+  .stp{display:grid;grid-template-columns:1fr auto 52px auto;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--rule)}
+  .stp>span{font-weight:600}.stp>b{font:700 28px/1 var(--display);text-align:center;font-variant-numeric:tabular-nums}
+  .stp .seg3{grid-column:2/5;display:flex;gap:6px}.stp .seg3 .rb{flex:1;padding:8px 4px;font-size:14px}
+  .rtoast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 14px;border-radius:10px;z-index:60;font-size:14px;box-shadow:0 6px 18px rgba(0,0,0,.3);transition:opacity .3s}
+  .acct{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .acct .rb{min-height:36px;padding:8px 10px;font-size:14px}
+  .acct .who{font-size:13px;color:var(--muted)}
+  .myc table{min-width:640px}.myc td.sv{font-weight:700;font-size:16px}
+  .myc td.sv.b{color:#1f6fb2}.myc td.sv.e{color:#1f6fb2;text-decoration:underline}.myc td.sv.o{color:var(--flag)}
+  .myc td.tap{cursor:pointer}.myc td.tap:hover{background:#eaf0e6}
+  .rlist{display:grid;gap:6px;margin-top:8px}
+  .rlist button{display:flex;justify-content:space-between;align-items:center;text-transform:none;letter-spacing:0;font:500 15px/1.2 var(--body)}
+  .rlist button b{font:700 20px/1 var(--display)}
+  @media (min-width:900px){.rsheet{bottom:auto;top:50%;transform:translateY(-50%);border-radius:18px}}
+  `;
+  document.head.appendChild(css);
+  const bg = document.createElement('div'); bg.className = 'rsheet-bg'; bg.id = 'rSheetBg'; bg.hidden = true; bg.onclick = closeSheet;
+  const sh = document.createElement('div'); sh.className = 'rsheet'; sh.id = 'rSheet'; sh.hidden = true; sh.setAttribute('role', 'dialog'); sh.setAttribute('aria-modal', 'true');
+  document.body.append(bg, sh);
+  const bar = document.createElement('div'); bar.className = 'rbar'; bar.id = 'rBar'; bar.hidden = true;
+  $('stage').appendChild(bar);
+  const acct = document.createElement('div'); acct.className = 'acct'; acct.id = 'rAcct';
+  document.querySelector('header.top').appendChild(acct);
+  const my = document.createElement('div'); my.className = 'myc'; my.id = 'myCard';
+  $('cardView').insertBefore(my, $('cardView').firstChild.nextSibling);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
+}
+function openSheet(html) {
+  $('rSheet').innerHTML = `<button class="close" aria-label="Close" id="rClose">×</button>` + html;
+  $('rSheet').hidden = false; $('rSheetBg').hidden = false; $('rClose').onclick = closeSheet;
+}
+function closeSheet() { if ($('rSheet')) { $('rSheet').hidden = true; $('rSheetBg').hidden = true; } }
+let toastT = null;
+function toast(msg) {
+  let t = $('rToast'); if (!t) { t = document.createElement('div'); t.id = 'rToast'; t.className = 'rtoast'; t.setAttribute('role', 'status'); document.body.appendChild(t); }
+  t.textContent = msg; t.style.opacity = 1; clearTimeout(toastT); toastT = setTimeout(() => t.style.opacity = 0, 2200);
+}
+function openClubs() {
+  const hole = YB.cur(), last = lastClub[hole];
+  openSheet(`<h3>Hole ${hole} · club for this shot</h3>
+    <p class="rm">${fixEN() ? 'Marks the shot where you are standing.' : 'No GPS fix on the course, so after picking a club, tap the ball\'s spot on the map.'}</p>
+    <div class="rgrid">${bag.map(c => `<button class="rb${c === last ? ' last' : ''}" data-c="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+    <div class="rbtns"><button class="rb ghost" id="editBag">Edit bag</button></div>`);
+  document.querySelectorAll('[data-c]').forEach(b => b.onclick = () => hit(b.dataset.c));
+  $('editBag').onclick = openBag;
+}
+function openBag() {
+  const all = Array.from(new Set(DEFAULT_BAG.concat(['2i', '3i', '7W', '9W', '50°', '52°', '54°', '56°', '58°', '60°']).concat(bag)));
+  const sel = new Set(bag);
+  openSheet(`<h3>Your bag</h3><p class="rm">Tap to add or remove clubs.</p><div class="rgrid">${all.map(c => `<button class="rb" data-bg="${esc(c)}" aria-pressed="${sel.has(c)}">${esc(c)}</button>`).join('')}</div><div class="rbtns"><button class="rb main" id="bagDone">Done</button></div>`);
+  document.querySelectorAll('[data-bg]').forEach(b => b.onclick = () => { const c = b.dataset.bg; sel.has(c) ? sel.delete(c) : sel.add(c); b.setAttribute('aria-pressed', sel.has(c)); });
+  $('bagDone').onclick = () => {
+    bag = all.filter(c => sel.has(c)); if (!bag.length) bag = DEFAULT_BAG.slice();
+    store.set(LS_BAG, bag); sync.saveProfile(); openClubs();
+  };
+}
+
+function renderBar() {
+  const bar = $('rBar'); if (!bar) return;
+  const r = activeRound();
+  const onHole = !/^#card$/.test(location.hash);
+  bar.hidden = !(r && onHole);
+  const ti = $('tapinfo'); if (ti) ti.style.display = (r && onHole) ? 'none' : '';
+  if (!r || !onHole) return;
+  const hole = YB.cur(), h = YB.H[hole - 1];
+  const shots = roundShots(r.id, hole), strokes = shots.filter(s => s.kind !== 'ongreen').length;
+  const en = fixEN();
+  let dist;
+  if (en) {
+    const d = greenFCB(h, en);
+    dist = d.f <= 0 ? `<div class="fcb"><span>On the green</span><b class="c" aria-label="Center ${d.c} yards">${d.c}</b><span>to center</span></div>`
+      : `<div class="fcb"><span>Front</span><b>${d.f}</b><b class="c" aria-label="Center ${d.c} yards">${d.c}</b><span>Back</span><b>${d.b}</b></div>`;
+  } else {
+    const why = !navigator.geolocation ? 'GPS not available in this browser' : gps.err === 'denied' ? 'Location is off for this site; allow it in your browser settings' :
+      awayFromCourse() ? 'GPS works; distances appear when you\'re at The Crown' : 'Finding GPS…';
+    dist = `<div class="rm" style="margin:0">${why}</div>`;
+  }
+  const acc = gps.fix && en ? `±${Math.round(gps.fix.acc * YD)} yd` : '';
+  const w = r.weather ? `${Math.round(r.weather.wind_mph)} mph wind · ${Math.round(r.weather.temp_f)}°` : '';
+  const pend = pending ? `<div class="rpend"><span>${pending.kind === 'ongreen' ? 'Tap the ball\'s spot on the green' : `Tap the ball's spot for your <b>${esc(pending.club)}</b>`}</span><button class="rb ghost" id="rCancel" style="min-height:34px;padding:6px 10px">Cancel</button></div>` : '';
+  bar.innerHTML = `${pend}<div class="dist">${dist}<div class="meta">Shot ${strokes + 1}${acc ? '<br>' + acc : ''}${w ? '<br>' + w : ''}</div></div>
+    <div class="acts"><button class="rb main" id="rHit">Hit</button><button class="rb" id="rGreen">On green</button><button class="rb" id="rPen">Penalty</button><button class="rb" id="rUndo" ${shots.length ? '' : 'disabled'}>Undo</button><button class="rb" id="rScore">Score${holeScore(r.id, hole) && holeScore(r.id, hole).score != null ? ' · ' + holeScore(r.id, hole).score : ''}</button></div>`;
+  $('rScore').onclick = () => openScoreSheet(hole, true);
+  $('rHit').onclick = openClubs; $('rGreen').onclick = onGreen; $('rPen').onclick = penalty; $('rUndo').onclick = undo;
+  if (pending) $('rCancel').onclick = () => { pending = null; renderBar(); };
+}
+
+function renderAcct() {
+  const el = $('rAcct'); if (!el) return;
+  const r = activeRound();
+  const parts = [];
+  if (r) {
+    const thru = lastPlayedHole(r);
+    parts.push(`<button class="rb" id="rCardBtn">Scorecard</button><button class="rb ghost" id="rEnd">End round${thru ? ' · thru ' + thru : ''}</button>`);
+  } else parts.push(`<button class="rb main" id="rStart" style="min-height:36px;font-size:15px">Start round</button>`);
+  if (sync.enabled) {
+    parts.push(sync.user ? `<span class="who">${esc(sync.user.email || 'Signed in')}${outbox.length ? ' · syncing' : ''}</span><button class="rb ghost" id="rOut">Sign out</button>`
+      : `<button class="rb" id="rIn">Sign in with Google</button>`);
+  }
+  el.innerHTML = parts.join('');
+  if ($('rStart')) $('rStart').onclick = startRound;
+  if ($('rEnd')) $('rEnd').onclick = () => {
+    openSheet(`<h3>End this round?</h3><p class="rm">You can still edit scores afterward from the scorecard.</p><div class="rbtns"><button class="rb main" id="rEndYes">End round</button><button class="rb ghost" id="rEndNo">Keep playing</button></div>`);
+    $('rEndYes').onclick = () => { closeSheet(); endRound(); }; $('rEndNo').onclick = closeSheet;
+  };
+  if ($('rCardBtn')) $('rCardBtn').onclick = () => location.hash = 'card';
+  if ($('rIn')) $('rIn').onclick = () => sync.signIn();
+  if ($('rOut')) $('rOut').onclick = () => sync.signOut();
+}
+
+/* ------------------------------------------------------------------ my scorecard view */
+let viewRoundId = null;
+const viewRound = () => data.rounds.find(r => r.id === viewRoundId) || activeRound() || null;
+function totals(r) {
+  let s = 0, p = 0, par = 0, n = 0, putts = 0, fwH = 0, fwN = 0;
+  for (let i = 1; i <= 18; i++) {
+    const sc = holeScore(r.id, i), h = YB.H[i - 1];
+    if (sc && sc.score != null) { s += sc.score; par += h.par; n++; if (sc.putts != null) putts += sc.putts; }
+    if (sc && h.par >= 4 && sc.fairway) { fwN++; if (sc.fairway === 'hit') fwH++; }
+  }
+  return { s, rel: s - par, n, putts, fw: fwN ? `${fwH}/${fwN}` : '–' };
+}
+function renderMyCard() {
+  const el = $('myCard'); if (!el) return;
+  const rounds = data.rounds.filter(r => r.course === COURSE_ID).sort((a, b) => b.started_at.localeCompare(a.started_at));
+  const r = viewRound();
+  if (!r) {
+    el.innerHTML = `<h2>Your scorecard</h2><p class="rm">Tap <b>Start round</b> at the top to keep score, track shots and get GPS distances.</p>`;
+    return;
+  }
+  const H = YB.H, t = totals(r);
+  const cell = (i) => {
+    const sc = holeScore(r.id, i), h = H[i - 1];
+    if (!sc || sc.score == null) return `<td class="sv tap" data-h="${i}">·</td>`;
+    const d = sc.score - h.par, cls = d <= -2 ? 'e' : d === -1 ? 'b' : d >= 1 ? 'o' : '';
+    return `<td class="sv tap ${cls}" data-h="${i}">${sc.score}</td>`;
+  };
+  const sub = (a, b, k) => { let v = 0, any = false; for (let i = a; i <= b; i++) { const sc = holeScore(r.id, i); if (sc && sc[k] != null) { v += sc[k]; any = true; } } return any ? v : ''; };
+  const row = (lbl, f, cls = '') => `<tr class="${cls}"><td>${lbl}</td>${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(f).join('')}<td><b>${'{OUT}'}</b></td>${[10, 11, 12, 13, 14, 15, 16, 17, 18].map(f).join('')}<td><b>{IN}</b></td><td><b>{TOT}</b></td></tr>`;
+  const fill = (s, k) => s.replace('{OUT}', sub(1, 9, k)).replace('{IN}', sub(10, 18, k)).replace('{TOT}', (sub(1, 9, k) === '' && sub(10, 18, k) === '') ? '' : (+sub(1, 9, k) || 0) + (+sub(10, 18, k) || 0));
+  const parRow = `<tr class="sub"><td>Par</td>${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => `<td>${H[i - 1].par}</td>`).join('')}<td>36</td>${[10, 11, 12, 13, 14, 15, 16, 17, 18].map(i => `<td>${H[i - 1].par}</td>`).join('')}<td>36</td><td>72</td></tr>`;
+  const head = `<tr><th>Hole</th>${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => `<th>${i}</th>`).join('')}<th>Out</th>${[10, 11, 12, 13, 14, 15, 16, 17, 18].map(i => `<th>${i}</th>`).join('')}<th>In</th><th>Tot</th></tr>`;
+  const fwCell = i => { const sc = holeScore(r.id, i), h = H[i - 1]; return `<td>${h.par < 4 ? '' : sc && sc.fairway ? (sc.fairway === 'hit' ? '✓' : sc.fairway === 'left' ? '←' : '→') : ''}</td>`; };
+  const date = new Date(r.started_at).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const others = rounds.filter(x => x.id !== r.id).slice(0, 12);
+  el.innerHTML = `<h2>${r.status === 'active' ? 'Current round' : 'Round'} · ${date} · ${esc(r.tee || '')}</h2>
+    <p class="rm">${t.n ? `<b style="font:700 22px var(--display);color:var(--ink)">${t.s}</b> through ${t.n} · ${t.rel === 0 ? 'even' : (t.rel > 0 ? '+' : '') + t.rel} · ${t.putts} putts · fairways ${t.fw}` : 'Tap any hole to enter a score.'}</p>
+    <div class="cardview"><table class="sc">${head}${parRow}${fill(row('Score', cell), 'score')}${fill(row('Putts', i => { const sc = holeScore(r.id, i); return `<td>${sc && sc.putts != null ? sc.putts : ''}</td>`; }), 'putts')}${row('Fairway', fwCell).replace('{OUT}', '').replace('{IN}', '').replace('{TOT}', '')}</table></div>
+    ${r.status === 'done' ? `<div class="rbtns"><button class="rb ghost" id="rDel">Delete this round</button></div>` : ''}
+    ${others.length ? `<h2 style="margin-top:16px">Past rounds</h2><div class="rlist">${others.map(o => { const tt = totals(o); return `<button class="rb" data-r="${o.id}"><span>${new Date(o.started_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} · ${esc(o.tee || '')}${o.status === 'active' ? ' · in progress' : ''}</span><b>${tt.n ? tt.s : '–'}</b></button>`; }).join('')}</div>` : ''}
+    <hr style="border:0;border-top:1px solid var(--rule);margin:16px 0">`;
+  el.querySelectorAll('td[data-h]').forEach(td => td.onclick = () => openScoreSheet(+td.dataset.h, false));
+  el.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { viewRoundId = b.dataset.r; renderMyCard(); window.scrollTo({ top: 0 }); });
+  if ($('rDel')) $('rDel').onclick = () => {
+    openSheet(`<h3>Delete this round?</h3><p class="rm">This removes its scores and shots${sync.user ? ' from your account too' : ''}. It can't be undone.</p><div class="rbtns"><button class="rb" id="rDelYes" style="background:var(--flag);color:#fff;border-color:var(--flag)">Delete round</button><button class="rb ghost" id="rDelNo">Cancel</button></div>`);
+    $('rDelYes').onclick = () => { deleteRound(r); viewRoundId = null; closeSheet(); render(); }; $('rDelNo').onclick = closeSheet;
+  };
+}
+
+/* ------------------------------------------------------------------ map overlays for this round's shots */
+function shotPathsForHole(hole) {
+  const r = activeRound() || viewRound(); if (!r) return [];
+  const pts = roundShots(r.id, hole).filter(s => s.lat != null).map(s => ({ en: G.toEN(s.lat, s.lon), s }));
+  return pts;
+}
+function draw2dOverlay(ctx, toScr, dpr) {
+  const pts = shotPathsForHole(YB.cur()); if (!pts.length) return;
+  const h = YB.H[YB.cur() - 1];
+  ctx.save(); ctx.lineWidth = 2 * dpr; ctx.strokeStyle = '#ffd23f'; ctx.setLineDash([]);
+  ctx.beginPath();
+  pts.forEach((p, i) => { const xy = toScr(p.en); i ? ctx.lineTo(xy[0], xy[1]) : ctx.moveTo(xy[0], xy[1]); });
+  ctx.stroke();
+  pts.forEach((p, i) => {
+    const xy = toScr(p.en);
+    ctx.fillStyle = p.s.kind === 'ongreen' ? '#ffffff' : '#ffd23f'; ctx.strokeStyle = '#14241d';
+    ctx.beginPath(); ctx.arc(xy[0], xy[1], 6 * dpr, 0, 7); ctx.fill(); ctx.stroke();
+    if (p.s.club) { ctx.font = `700 ${11 * dpr}px "Barlow Condensed",sans-serif`; ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.fillText(p.s.club, xy[0] + 9 * dpr, xy[1] + 4 * dpr); }
+  });
+  // distance of each completed shot
+  ctx.font = `600 ${11 * dpr}px "Barlow",sans-serif`; ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+  for (let i = 1; i < pts.length; i++) {
+    const a = toScr(pts[i - 1].en), b = toScr(pts[i].en);
+    ctx.fillText(distYd(pts[i - 1].en, pts[i].en) + ' yd', (a[0] + b[0]) / 2, (a[1] + b[1]) / 2 - 6 * dpr);
+  }
+  const en = fixEN();
+  if (en && activeRound()) { const xy = toScr(en); ctx.fillStyle = '#2f80ed'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 3 * dpr; ctx.beginPath(); ctx.arc(xy[0], xy[1], 7 * dpr, 0, 7); ctx.fill(); ctx.stroke(); }
+  ctx.restore();
+}
+function build3dOverlay(group, THREE, toV) {
+  const pts = shotPathsForHole(YB.cur()); if (!pts.length) return;
+  const mat = new THREE.MeshBasicMaterial({ color: '#ffd23f', depthTest: false });
+  const wmat = new THREE.MeshBasicMaterial({ color: '#ffffff', depthTest: false });
+  const geo = new THREE.SphereGeometry(1.8, 14, 10);
+  const line = [];
+  pts.forEach(p => {
+    const v = toV(p.en[0], p.en[1], 1.5); line.push(v);
+    const m = new THREE.Mesh(geo, p.s.kind === 'ongreen' ? wmat : mat); m.position.copy(v); m.renderOrder = 11; group.add(m);
+  });
+  if (line.length > 1) {
+    const pts3 = [];
+    for (let i = 1; i < line.length; i++) {
+      const a = line[i - 1], b = line[i], mid = a.clone().lerp(b, .5); mid.y += a.distanceTo(b) * 0.22;
+      pts3.push(...new THREE.QuadraticBezierCurve3(a, mid, b).getPoints(24));
+    }
+    const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts3), new THREE.LineBasicMaterial({ color: '#ffd23f', depthTest: false }));
+    l.renderOrder = 10; group.add(l);
+  }
+}
+
+/* ------------------------------------------------------------------ sync (Supabase) */
+const sync = {
+  enabled: false, client: null, user: null, busy: false, timer: null,
+  async init() {
+    const cfg = window.YB_CONFIG || {};
+    if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) return;
+    try {
+      await new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js'; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+      this.client = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { flowType: 'pkce', detectSessionInUrl: true, persistSession: true } });
+      this.enabled = true;
+      const { data: { session } } = await this.client.auth.getSession();
+      this.user = session ? session.user : null;
+      this.client.auth.onAuthStateChange((ev, s) => { const was = this.user && this.user.id; this.user = s ? s.user : null; if (this.user && this.user.id !== was) this.afterSignIn(); renderAcct(); });
+      // clean ?code= from the address bar after the sign-in redirect
+      if (/[?&]code=/.test(location.search)) history.replaceState(null, '', location.pathname + location.hash);
+      if (this.user) await this.afterSignIn();
+    } catch (e) { console.warn('sync unavailable', e); this.enabled = false; }
+    renderAcct();
+  },
+  signIn() { this.client.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname } }); },
+  async signOut() { await this.client.auth.signOut(); this.user = null; renderAcct(); toast('Signed out. Rounds stay on this phone.'); },
+  async afterSignIn() {
+    // first sign-in on this device: send everything recorded while signed out
+    if (store.get(LS_MERGED, null) !== this.user.id) {
+      data.rounds.forEach(r => outbox.push({ table: 'rounds', op: 'upsert', row: r }));
+      data.scores.forEach(s => outbox.push({ table: 'hole_scores', op: 'upsert', row: s }));
+      data.shots.forEach(s => outbox.push({ table: 'shots', op: 'upsert', row: s }));
+      store.set(LS_OUTBOX, outbox); store.set(LS_MERGED, this.user.id);
+      this.saveProfile();
+    }
+    await this.flush();
+    await this.pull();
+  },
+  async pull() {
+    if (!this.user) return;
+    try {
+      const c = this.client;
+      const [r1, r2, r3, r4] = await Promise.all([
+        c.from('rounds').select('*').eq('course', COURSE_ID),
+        c.from('hole_scores').select('*'),
+        c.from('shots').select('*'),
+        c.from('profiles').select('*').maybeSingle()
+      ]);
+      if (r1.error || r2.error || r3.error) throw (r1.error || r2.error || r3.error);
+      const pendingIds = new Set(outbox.map(o => o.row.id || (o.row.round_id + ':' + o.row.hole)));
+      const merge = (local, remote, key) => {
+        const m = new Map(local.map(x => [key(x), x]));
+        remote.forEach(x => { const k = key(x); const l = m.get(k); if (pendingIds.has(k)) return; if (!l || (x.updated_at || '') >= (l.updated_at || '')) m.set(k, strip(x)); });
+        return [...m.values()];
+      };
+      data.rounds = merge(data.rounds, r1.data, x => x.id);
+      data.scores = merge(data.scores, r2.data, x => x.round_id + ':' + x.hole);
+      data.shots = merge(data.shots, r3.data, x => x.id);
+      if (r4.data && Array.isArray(r4.data.bag) && r4.data.bag.length) { bag = r4.data.bag; store.set(LS_BAG, bag); }
+      save(); render(); YB.refresh();
+    } catch (e) { console.warn('pull failed', e); }
+  },
+  saveProfile() { if (this.user) { outbox.push({ table: 'profiles', op: 'upsert', row: { bag, default_tee: YB.tee() } }); store.set(LS_OUTBOX, outbox); this.flushSoon(); } },
+  flushSoon() { clearTimeout(this.timer); this.timer = setTimeout(() => this.flush(), 600); },
+  async flush() {
+    if (!this.user || this.busy || !outbox.length || !navigator.onLine) { renderAcct(); return; }
+    this.busy = true;
+    try {
+      while (outbox.length) {
+        const o = outbox[0];
+        let res;
+        if (o.op === 'delete') res = await this.client.from(o.table).delete().eq('id', o.row.id);
+        else {
+          const row = strip(o.row);
+          res = await this.client.from(o.table).upsert(row, { onConflict: o.table === 'hole_scores' ? 'round_id,hole' : o.table === 'profiles' ? 'user_id' : 'id' });
+        }
+        if (res.error) { console.warn('sync error', o, res.error); if (/JWT|auth/i.test(res.error.message || '')) break; }
+        outbox.shift(); store.set(LS_OUTBOX, outbox);
+      }
+    } catch (e) { console.warn('flush stopped', e); }
+    this.busy = false; renderAcct();
+  }
+};
+function strip(row) { const r = Object.assign({}, row); delete r.user_id; return r; }
+window.addEventListener('online', () => sync.flush());
+
+/* ------------------------------------------------------------------ wiring */
+function render() { renderAcct(); renderBar(); renderMyCard(); }
+function boot() {
+  if (!window.YB) return setTimeout(boot, 50);
+  G = geoFns();
+  ensureChrome();
+  YB.hooks.draw2d = draw2dOverlay;
+  YB.hooks.build3d = build3dOverlay;
+  YB.hooks.tap = (e, n) => {
+    if (!pending) return false;
+    const p = pending; pending = null;
+    if (p.kind === 'ongreen') p.place([e, n], 'map'); else recordShot(p.club, [e, n], 'map');
+    return true;
+  };
+  window.addEventListener('hashchange', () => { closeSheet(); render(); });
+  if (activeRound()) startGPS();
+  render();
+  sync.init();
+  // keep the GPS dot moving on the hole map
+  setInterval(() => { if (activeRound() && gps.fix && !/^#card$/.test(location.hash)) YB.refresh2d(); }, 4000);
+}
+boot();
+})();
