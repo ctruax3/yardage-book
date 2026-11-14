@@ -76,8 +76,9 @@ function compute(scores, opts = {}) {
   const lows = [];         // {date, index} after each revision
 
   for (const s of list) {
-    const established = recs.length >= 3 || index != null;
-    const curIndex = recs.length >= 3 ? history[history.length - 1].index : index;
+    // the Index in effect before this score: our own once we have one, else the player's official one
+    const curIndex = history.length ? history[history.length - 1].index : index;
+    const established = curIndex != null;
     let rec = { id: s.id, date: s.date, source: s, notes: [] };
 
     if (s.kind === 'diff') {

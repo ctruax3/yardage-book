@@ -285,6 +285,15 @@ function ensureChrome() {
   .aform{display:grid;gap:10px}.aform label{display:grid;gap:4px;font-size:13px;font-weight:600;color:var(--muted)}
   .aform input,.aform select{font:500 17px var(--body);padding:10px;border:1px solid var(--rule);border-radius:8px;background:#fff;color:var(--ink);min-height:44px}
   .aform .mscore{display:grid;grid-template-columns:1fr 1fr;gap:10px}.aform .mscore p{grid-column:1/-1;margin:0}
+  .impsrc{display:grid;gap:8px;margin:10px 0}.impsrc .rb{display:flex;align-items:center;justify-content:center;text-align:center}
+  .impfile{cursor:pointer}
+  table.grid{min-width:520px}table.grid td{padding:3px}table.grid input,table.grid select{width:100%;font:15px var(--body);padding:8px;border:1px solid var(--rule);border-radius:6px;min-height:40px;background:#fff}
+  table.grid td:nth-child(1){width:150px}table.grid td:nth-child(4){width:70px}table.grid td:nth-child(5){width:64px}
+  table.imprev tr.bad td{color:var(--flag)} table.imprev tr.dup td{color:var(--muted);text-decoration:line-through}
+  .crow{display:grid;grid-template-columns:1.6fr 1fr 1fr .8fr;gap:8px;align-items:end;padding:8px 0;border-bottom:1px solid var(--rule)}
+  @media (max-width:520px){.crow{grid-template-columns:1fr 1fr .8fr}.crow .cname{grid-column:1/-1}}
+  .rsheet{max-width:640px}
+  .crow label{min-width:0;display:block}.crow input{width:100%;min-width:0;box-sizing:border-box}.crow input::placeholder{color:#b9bfb7}
   .myc tr.strokes td{font-size:12px;color:var(--pine);letter-spacing:-1px}
   @media (min-width:900px){.rsheet{bottom:auto;top:50%;transform:translateY(-50%);border-radius:18px}}
   `;
@@ -563,14 +572,20 @@ const sync = {
     try {
       while (outbox.length) {
         const o = outbox[0];
-        let res;
+        let res, n = 1;
         if (o.op === 'delete') res = await this.client.from(o.table).delete().eq('id', o.row.id);
         else {
-          const row = strip(o.row);
-          res = await this.client.from(o.table).upsert(row, { onConflict: o.table === 'hole_scores' ? 'round_id,hole' : o.table === 'profiles' ? 'user_id' : 'id' });
+          // send runs of upserts to the same table in one request (imports can be hundreds of rows)
+          const batch = [strip(o.row)];
+          while (n < outbox.length && n < 200 && outbox[n].op === 'upsert' && outbox[n].table === o.table && o.table !== 'profiles') { batch.push(strip(outbox[n].row)); n++; }
+          const conflict = o.table === 'hole_scores' ? 'round_id,hole' : o.table === 'profiles' ? 'user_id' : 'id';
+          // de-duplicate within a batch (same row edited twice): keep the last version
+          const keyOf = x => o.table === 'hole_scores' ? x.round_id + ':' + x.hole : x.id;
+          const uniq = [...new Map(batch.map(x => [keyOf(x), x])).values()];
+          res = await this.client.from(o.table).upsert(o.table === 'profiles' ? uniq[0] : uniq, { onConflict: conflict });
         }
-        if (res.error) { console.warn('sync error', o, res.error); if (/JWT|auth/i.test(res.error.message || '')) break; }
-        outbox.shift(); store.set(LS_OUTBOX, outbox);
+        if (res.error) { console.warn('sync error', o, res.error); if (/JWT|auth|fetch|network/i.test(res.error.message || '')) break; }
+        outbox.splice(0, n); store.set(LS_OUTBOX, outbox);
       }
     } catch (e) { console.warn('flush stopped', e); }
     this.busy = false; renderAcct();
@@ -618,7 +633,7 @@ function allScores() {
       ? { id: p.id, date: p.played_on, kind: '9', ags: +p.ags, gross: p.gross != null ? +p.gross : null, rating: +p.course_rating * 2, slope: +p.slope, par: (+p.par || 36) * 2, ratingPlayed: +p.course_rating, slopePlayed: +p.slope, nHoles: 9, course: p.course, tee: p.tee, posted: p, shownRating: +p.course_rating }
       : { id: p.id, date: p.played_on, kind: '18', ags: +p.ags, gross: p.gross != null ? +p.gross : null, rating: +p.course_rating, slope: +p.slope, par: +p.par || 72, nHoles: 18, course: p.course, tee: p.tee, posted: p })));
 }
-let hcCache = null;
+let hcCache = null, profileShowAll = false;
 function handicap() {
   if (!window.WHS) return null;
   hcCache = WHS.compute(allScores(), { startIndex: profile.official_index != null ? +profile.official_index : null });
@@ -682,7 +697,8 @@ function renderProfile() {
   const name = (sync.user && (sync.user.user_metadata && (sync.user.user_metadata.full_name || sync.user.user_metadata.name))) || profile.display_name || 'Your profile';
   const tees = ['Black', 'Blue', 'Blue/White', 'White'];
   const chRows = tees.map(t => { const rs = ratingFor(t); const ch = courseHcp(t); return `<tr><td>${t}</td><td>${rs ? rs[0].toFixed(1) + ' / ' + rs[1] : '<span class="rm">not set</span>'}</td><td class="big">${ch == null ? '–' : ch < 0 ? '+' + (-ch) : ch}</td></tr>`; }).join('');
-  const recs = hc ? hc.records.slice().reverse() : [];
+  const allRecs = hc ? hc.records.slice().reverse() : [];
+  const recs = profileShowAll ? allRecs : allRecs.slice(0, 40);
   const row = r => {
     const s = r.source, crown = !!s.roundId;
     const d = new Date(r.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' });
@@ -723,14 +739,18 @@ function renderProfile() {
     </div>
   </div>
   <div class="box" style="margin-top:12px">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">Score history</h2><button class="rb" id="pfAdd">Add a score</button></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">Score history</h2><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="rb" id="pfImport">Import scores</button><button class="rb ghost" id="pfAdd">Add one</button></div></div>
+    ${store.get(LS_LASTIMPORT, []).length ? `<p class="rm">Last import: ${store.get(LS_LASTIMPORT, []).length} scores · <a href="#" id="pfUndoImp">undo it</a></p>` : ''}
     <p class="rm">Highlighted differentials are the ones counting toward your Index. Numbers in brackets are adjusted for net double bogey. * marks an exceptional score.</p>
-    <div class="cardview"><table class="pt hist"><thead><tr><th>Date</th><th>Course</th><th>Score</th><th>Rating</th><th>Diff</th></tr></thead><tbody>${recs.length ? recs.map(row).join('') : '<tr><td colspan="5" class="rm">No scores yet. Finish a round at The Crown, or add scores from other courses or from GHIN.</td></tr>'}</tbody></table></div>
+    <div class="cardview"><table class="pt hist"><thead><tr><th>Date</th><th>Course</th><th>Score</th><th>Rating</th><th>Diff</th></tr></thead><tbody>${recs.length ? recs.map(row).join('') + (allRecs.length > recs.length ? `<tr><td colspan="5"><button class="rb ghost" id="pfAll" style="width:100%">Show all ${allRecs.length} scores</button></td></tr>` : '') : '<tr><td colspan="5" class="rm">No scores yet. Finish a round at The Crown, or import your history from another app or GHIN.</td></tr>'}</tbody></table></div>
   </div>
   <p class="small">This is an unofficial index calculated with the World Handicap System rules (2024 revision). It doesn't apply Playing Conditions Calculation, and the expected score used for 9-hole and partial rounds is a close approximation of the USGA's formula. An official Handicap Index comes from your golf association through GHIN.</p>`;
   $('pfOffSave').onclick = () => { const v = $('pfOff').value.trim().replace('+', '-'); profile.official_index = v === '' ? null : (isNaN(+v) ? profile.official_index : Math.max(-10, Math.min(54, +v))); saveProfileLocal(); render(); toast('Saved'); };
   $('pfAdd').onclick = openAddScore;
+  $('pfImport').onclick = openImport;
+  if ($('pfUndoImp')) $('pfUndoImp').onclick = e => { e.preventDefault(); openSheet(`<h3>Undo last import?</h3><p class="rm">Removes the ${store.get(LS_LASTIMPORT, []).length} scores from your last import${sync.user ? ', including from your account' : ''}.</p><div class="rbtns"><button class="rb" id="uiYes" style="background:var(--flag);color:#fff;border-color:var(--flag)">Remove them</button><button class="rb ghost" id="uiNo">Cancel</button></div>`); $('uiYes').onclick = () => { closeSheet(); undoLastImport(); }; $('uiNo').onclick = closeSheet; };
   $('pfRatings').onclick = openRatings;
+  if ($('pfAll')) $('pfAll').onclick = () => { profileShowAll = true; renderProfile(); };
   $('pfGender').onclick = () => { profile.gender = profile.gender === 'F' ? 'M' : 'F'; saveProfileLocal(); render(); };
   if ($('pfIn')) $('pfIn').onclick = e => { e.preventDefault(); sync.signIn(); };
   el.querySelectorAll('tr.go').forEach(tr => tr.onclick = () => { viewRoundId = tr.dataset.id; location.hash = 'card'; });
@@ -791,6 +811,173 @@ function openRatings() {
     saveProfileLocal(); closeSheet(); render();
   };
   $('rtReset').onclick = () => { if (profile.tee_ratings) delete profile.tee_ratings[g]; saveProfileLocal(); closeSheet(); render(); };
+}
+
+
+/* ------------------------------------------------------------------ bulk import */
+const LS_LASTIMPORT = 'yb-last-import';
+function savedCourses() { return (profile.tee_ratings && profile.tee_ratings._courses) || {}; }
+function rememberCourse(key, v) { profile.tee_ratings = profile.tee_ratings || {}; profile.tee_ratings._courses = Object.assign({}, savedCourses(), { [key]: v }); }
+function knownRating(course, tee) {
+  const k = YBImport.courseKey(course, tee), sc = savedCourses();
+  if (sc[k]) return sc[k];
+  if (/crown/i.test(course || '') && tee) { const rs = ratingFor(tee.replace(/\b\w/g, c => c.toUpperCase())); if (rs) return { rating: rs[0], slope: rs[1], par: 72 }; }
+  const anyTee = Object.keys(sc).find(x => x.split('|')[0] === YBImport.courseKey(course, '').split('|')[0]);
+  return anyTee && !tee ? sc[anyTee] : null;
+}
+const FIELD_LABELS = { date: 'Date', course: 'Course', tee: 'Tee', score: 'Score', holes: 'Holes', rating: 'Rating', slope: 'Slope', par: 'Par', diff: 'Differential' };
+let imp = null;   // import session state
+
+function openImport() {
+  imp = { rows: null, header: null, map: null, items: null, src: null };
+  openSheet(`<h3>Import scores</h3>
+    <p class="rm">Bring in your history from another app or a spreadsheet. Each row needs a date and a score (or a Score Differential from GHIN). You'll add each course's rating and slope once.</p>
+    <div class="impsrc">
+      <label class="rb impfile">Upload a CSV file<input type="file" id="impFile" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden></label>
+      <button class="rb" id="impPasteBtn">Paste rows</button>
+      <button class="rb" id="impTypeBtn">Type them in</button>
+    </div>
+    <p class="rm"><b>18Birdies</b> doesn't export scores, so open Rounds Played and type them in here (or copy them into a spreadsheet first and paste). <b>GHIN</b> users can paste their score history with the differential column.</p>`);
+  $('impFile').onchange = e => { const f = e.target.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => fromText(String(rd.result), 'file'); rd.readAsText(f); };
+  $('impPasteBtn').onclick = openPaste;
+  $('impTypeBtn').onclick = () => openGrid([]);
+}
+function openPaste() {
+  openSheet(`<h3>Paste rows</h3><p class="rm">Copy rows from a spreadsheet, notes or a GHIN score list. One round per line, e.g.<br><code>6/14/2025, Elmbrook, White, 88</code></p>
+    <textarea id="impText" rows="10" style="width:100%;font:14px/1.4 ui-monospace,monospace;padding:10px;border:1px solid var(--rule);border-radius:8px" placeholder="Date, Course, Tee, Score"></textarea>
+    <div class="rbtns"><button class="rb ghost" id="impBack">Back</button><button class="rb main" id="impGo">Continue</button></div>`);
+  $('impBack').onclick = openImport;
+  $('impGo').onclick = () => { const t = $('impText').value; if (t.trim()) fromText(t, 'paste'); };
+}
+function openGrid(prefill) {
+  const courses = Array.from(new Set(data.posted.map(p => p.course).filter(Boolean).concat(Object.keys(savedCourses()).map(k => k.split('|')[0])))).slice(0, 50);
+  const rowHtml = (r = {}) => `<tr><td><input type="date" class="g-date" value="${r.date ? r.date.slice(0, 10) : ''}"></td><td><input class="g-course" list="impCourses" value="${esc(r.course || '')}" placeholder="Course"></td><td><input class="g-tee" value="${esc(r.tee || '')}" placeholder="Tee"></td><td><input class="g-score" inputmode="numeric" value="${r.score ?? ''}" placeholder="88"></td><td><select class="g-holes"><option ${r.holes === 9 ? '' : 'selected'}>18</option><option ${r.holes === 9 ? 'selected' : ''}>9</option></select></td></tr>`;
+  openSheet(`<h3>Type in scores</h3><p class="rm">Course names fill in as you type. Leave a row blank to skip it.</p>
+    <datalist id="impCourses">${courses.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
+    <div class="cardview"><table class="pt grid"><thead><tr><th>Date</th><th>Course</th><th>Tee</th><th>Score</th><th>Holes</th></tr></thead><tbody id="impGridBody">${(prefill.length ? prefill : Array(8).fill({})).map(rowHtml).join('')}</tbody></table></div>
+    <div class="rbtns"><button class="rb ghost" id="impMore">+ 10 rows</button><button class="rb ghost" id="impBack">Back</button><button class="rb main" id="impGo">Continue</button></div>`);
+  $('impMore').onclick = () => $('impGridBody').insertAdjacentHTML('beforeend', Array(10).fill(0).map(() => rowHtml()).join(''));
+  $('impBack').onclick = openImport;
+  // carry the course/tee down to the next empty row to save typing
+  $('impGridBody').addEventListener('change', e => {
+    const tr = e.target.closest('tr'), nx = tr && tr.nextElementSibling;
+    if (!nx) return;
+    if (e.target.classList.contains('g-course') && !nx.querySelector('.g-course').value) nx.querySelector('.g-course').placeholder = e.target.value || 'Course';
+  });
+  $('impGo').onclick = () => {
+    const rows = [];
+    let lastCourse = '', lastTee = '';
+    $('impGridBody').querySelectorAll('tr').forEach(tr => {
+      const d = tr.querySelector('.g-date').value, c = tr.querySelector('.g-course').value.trim() || '', t = tr.querySelector('.g-tee').value.trim(), s = tr.querySelector('.g-score').value.trim(), h = tr.querySelector('.g-holes').value;
+      if (!d && !s) return;
+      rows.push([d, c || lastCourse, t || (c ? '' : lastTee), s, h]);
+      if (c) lastCourse = c; if (t) lastTee = t;
+    });
+    if (!rows.length) return;
+    imp.src = 'grid'; imp.rows = rows; imp.header = ['Date', 'Course', 'Tee', 'Score', 'Holes'];
+    imp.map = { date: 0, course: 1, tee: 2, score: 3, holes: 4 };
+    review();
+  };
+}
+function fromText(text, src) {
+  const rows = YBImport.parseCSV(text);
+  if (!rows.length) { toast('Nothing to import in that text'); return; }
+  const hasHeader = YBImport.looksLikeHeader(rows[0]);
+  imp.src = src;
+  imp.header = hasHeader ? rows[0] : rows[0].map((_, i) => 'Column ' + (i + 1));
+  imp.rows = hasHeader ? rows.slice(1) : rows;
+  imp.map = hasHeader ? YBImport.guessMapping(rows[0]) : YBImport.inferMapping(imp.rows);
+  review();
+}
+function dupKey(date, course, score, diff) { return (date || '').slice(0, 10) + '|' + (course || '').toLowerCase().trim() + '|' + (score ?? '') + '|' + (diff ?? ''); }
+function review() {
+  imp.items = YBImport.normalize(imp.rows, imp.map);
+  const existing = new Set(data.posted.map(p => dupKey(p.played_on, p.course, p.ags, p.ags == null ? p.differential : null)));
+  const seen = new Set();
+  imp.items.forEach(it => {
+    const k = dupKey(it.date, it.course, it.diff == null ? it.score : null, it.diff);
+    it.dup = existing.has(k) || seen.has(k); seen.add(k);
+  });
+  const ok = imp.items.filter(i => !i.errors.length && !i.dup), bad = imp.items.filter(i => i.errors.length), dups = imp.items.filter(i => i.dup && !i.errors.length);
+  const cols = imp.header.map((h, i) => `<option value="${i}">${esc(h)}</option>`).join('');
+  const mapUI = imp.src === 'grid' ? '' : `<details ${imp.map.date == null || (imp.map.score == null && imp.map.diff == null) ? 'open' : ''}><summary class="rm" style="cursor:pointer">Columns: ${Object.keys(FIELD_LABELS).filter(f => imp.map[f] != null).map(f => FIELD_LABELS[f] + ' → ' + esc(imp.header[imp.map[f]])).join(', ') || 'not detected'} · change</summary>
+    <div class="aform" style="grid-template-columns:1fr 1fr;display:grid;margin-top:8px">${Object.keys(FIELD_LABELS).map(f => `<label>${FIELD_LABELS[f]}<select data-map="${f}"><option value="">(none)</option>${cols}</select></label>`).join('')}</div></details>`;
+  const fmt = it => `<tr class="${it.errors.length ? 'bad' : it.dup ? 'dup' : ''}"><td style="white-space:nowrap">${it.date ? new Date(it.date).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit', timeZone: 'UTC' }) : '?'}</td><td>${esc(it.course || '')}${it.tee ? '<small> · ' + esc(it.tee) + '</small>' : ''}</td><td>${it.diff != null ? 'diff ' + it.diff : (it.score ?? '–')}${it.holes === 9 ? '<small> · 9</small>' : ''}</td><td><small>${it.errors.join(', ') || (it.dup ? 'already imported' : '')}</small></td></tr>`;
+  const preview = imp.items.slice(0, 6).concat(bad.filter(b => imp.items.indexOf(b) >= 6).slice(0, 4));
+  openSheet(`<h3>Review · ${imp.items.length} row${imp.items.length === 1 ? '' : 's'}</h3>
+    <p class="rm"><b style="color:var(--ink)">${ok.length} ready</b>${bad.length ? ` · ${bad.length} with problems (skipped)` : ''}${dups.length ? ` · ${dups.length} already imported (skipped)` : ''}</p>
+    ${mapUI}
+    <div class="cardview"><table class="pt imprev"><tbody>${preview.map(fmt).join('')}</tbody></table></div>
+    ${imp.items.length > preview.length ? `<p class="rm">…and ${imp.items.length - preview.length} more</p>` : ''}
+    <div class="rbtns"><button class="rb ghost" id="impBack">Back</button><button class="rb main" id="impNext" ${ok.length ? '' : 'disabled'}>Next: course ratings</button></div>`);
+  document.querySelectorAll('[data-map]').forEach(sel => { const f = sel.dataset.map; sel.value = imp.map[f] != null ? String(imp.map[f]) : ''; sel.onchange = () => { if (sel.value === '') delete imp.map[f]; else imp.map[f] = +sel.value; review(); }; });
+  $('impBack').onclick = () => imp.src === 'grid' ? openGrid(imp.items) : imp.src === 'paste' ? openPaste() : openImport();
+  $('impNext').onclick = ratingsStep;
+}
+function ratingsStep() {
+  const ready = imp.items.filter(i => !i.errors.length && !i.dup);
+  const groups = new Map();
+  ready.filter(i => i.diff == null && (i.rating == null || i.slope == null)).forEach(i => {
+    const k = YBImport.courseKey(i.course, i.tee) + '|' + i.holes;
+    if (!groups.has(k)) groups.set(k, { course: i.course, tee: i.tee, holes: i.holes, n: 0, known: knownRating(i.course, i.tee) });
+    groups.get(k).n++;
+  });
+  if (!groups.size) return doImport({});
+  const gs = [...groups.entries()].sort((a, b) => (b[1].holes - a[1].holes) || (b[1].n - a[1].n));
+  openSheet(`<h3>Course ratings</h3>
+    <p class="rm">Enter each course's rating and slope once, from the scorecard or GHIN's course lookup.${gs.some(([, g]) => g.holes === 9) ? ' Leave 9-hole rows blank to use half the 18-hole rating for that course.' : ''} Leave a course blank to skip its rounds for now.</p>
+    <form id="rtgForm" class="aform">${gs.map(([k, g], i) => {
+      const kn = g.known && g.holes === 18 ? g.known : null;
+      return `<div class="crow"><div class="cname"><b>${esc(g.course || 'Unnamed course')}</b>${g.tee ? ' · ' + esc(g.tee) : ''}${g.holes === 9 ? ' · 9 holes' : ''}<br><small class="rm">${g.n} round${g.n === 1 ? '' : 's'}</small></div>
+        <label>Rating<input id="cr${i}" inputmode="decimal" value="${kn ? kn.rating : ''}" placeholder="${g.holes === 9 ? '35.4' : '70.8'}"></label>
+        <label>Slope<input id="cs${i}" inputmode="numeric" value="${kn ? kn.slope : ''}" placeholder="125"></label>
+        <label>Par<input id="cp${i}" inputmode="numeric" value="${kn ? kn.par || 72 : (g.holes === 9 ? 36 : 72)}"></label></div>`; }).join('')}
+      <p class="rm" id="rtgErr" style="color:var(--flag)"></p>
+      <div class="rbtns"><button class="rb ghost" type="button" id="impBack">Back</button><button class="rb main" type="submit">Import</button></div></form>`);
+  $('impBack').onclick = review;
+  $('rtgForm').onsubmit = e => {
+    e.preventDefault();
+    const rmap = {};
+    for (let i = 0; i < gs.length; i++) {
+      const [k, g] = gs[i]; const cr = parseFloat($('cr' + i).value), sl = parseInt($('cs' + i).value, 10), par = parseInt($('cp' + i).value, 10) || (g.holes === 9 ? 36 : 72);
+      if (!cr && !sl) {
+        // 9-hole group left blank: derive from the same course/tee's 18-hole numbers
+        if (g.holes === 9) { const full = rmap[YBImport.courseKey(g.course, g.tee) + '|18'] || knownRating(g.course, g.tee); if (full) rmap[k] = { rating: Math.round(full.rating * 5) / 10, slope: full.slope, par: Math.round((full.par || 72) / 2) }; }
+        continue;
+      }
+      if (!cr || !sl || sl < 55 || sl > 155 || (g.holes === 18 && (cr < 55 || cr > 80)) || (g.holes === 9 && (cr < 27 || cr > 40))) { $('rtgErr').textContent = `Check the rating and slope for ${g.course || 'that course'}.`; return; }
+      rmap[k] = { rating: cr, slope: sl, par };
+      if (g.holes === 18) rememberCourse(YBImport.courseKey(g.course, g.tee), { rating: cr, slope: sl, par });
+    }
+    doImport(rmap);
+  };
+}
+function doImport(rmap) {
+  const ready = imp.items.filter(i => !i.errors.length && !i.dup);
+  const ids = []; let skipped = 0;
+  ready.forEach(i => {
+    const p = { id: uuid(), played_on: i.date, course: i.course, tee: i.tee, holes: i.holes, gross: null, ags: null, course_rating: null, slope: null, par: null, differential: null };
+    if (i.diff != null) p.differential = i.diff;
+    else {
+      const r = (i.rating != null && i.slope != null) ? { rating: i.rating, slope: i.slope, par: i.par || (i.holes === 9 ? 36 : 72) } : rmap[YBImport.courseKey(i.course, i.tee) + '|' + i.holes];
+      if (!r) { skipped++; return; }
+      Object.assign(p, { gross: i.score, ags: i.score, course_rating: r.rating, slope: r.slope, par: r.par });
+    }
+    p.updated_at = nowIso(); data.posted.push(p); outbox.push({ table: 'posted_scores', op: 'upsert', row: p }); ids.push(p.id);
+  });
+  save(); store.set(LS_OUTBOX, outbox); store.set(LS_LASTIMPORT, ids);
+  saveProfileLocal(); sync.flushSoon();
+  closeSheet(); imp = null;
+  location.hash = 'profile'; render();
+  const h = hcCache || handicap();
+  toast(`Imported ${ids.length} score${ids.length === 1 ? '' : 's'}${skipped ? ` · ${skipped} skipped (no rating)` : ''}${h && h.index != null ? ` · Index ${fmtIx(h.index)}` : ''}`);
+}
+function undoLastImport() {
+  const ids = new Set(store.get(LS_LASTIMPORT, []));
+  if (!ids.size) return;
+  data.posted.filter(p => ids.has(p.id)).forEach(p => queue('posted_scores', 'delete', { id: p.id }));
+  data.posted = data.posted.filter(p => !ids.has(p.id)); save(); store.set(LS_LASTIMPORT, []);
+  render(); toast(`Removed ${ids.size} imported scores`);
 }
 
 /* ------------------------------------------------------------------ wiring */
