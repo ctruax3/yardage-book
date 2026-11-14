@@ -261,14 +261,14 @@ function ensureChrome() {
   .rtoast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 14px;border-radius:10px;z-index:60;font-size:14px;box-shadow:0 6px 18px rgba(0,0,0,.3);transition:opacity .3s}
   .acct{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
   .acct .rb{min-height:36px;padding:8px 10px;font-size:14px}
-  .acct .who{font-size:13px;color:var(--muted)}
+  .acct .who{font-size:13px;color:var(--muted);max-width:40vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}@media (max-width:560px){.acct .who{display:none}}
   .myc table{min-width:640px}.myc td.sv{font-weight:700;font-size:16px}
   .myc td.sv.b{color:#1f6fb2}.myc td.sv.e{color:#1f6fb2;text-decoration:underline}.myc td.sv.o{color:var(--flag)}
   .myc td.tap{cursor:pointer}.myc td.tap:hover{background:#eaf0e6}
   .rlist{display:grid;gap:6px;margin-top:8px}
   .rlist button{display:flex;justify-content:space-between;align-items:center;text-transform:none;letter-spacing:0;font:500 15px/1.2 var(--body)}
   .rlist button b{font:700 20px/1 var(--display)}
-  .pgrid{display:grid;gap:12px}@media (min-width:900px){.pgrid{grid-template-columns:1fr 1fr}}
+  .pgrid{display:grid;gap:12px}.pgrid>*{min-width:0}.pgrid .box{overflow-x:auto}#profileView{max-width:100%;overflow-x:hidden}@media (min-width:900px){.pgrid{grid-template-columns:1fr 1fr}}
   .hix{display:flex;gap:24px;align-items:flex-end;margin-bottom:6px}
   .hix .k,.sgrid .k{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
   .hix .v{font:700 56px/1 var(--display);color:var(--pine);font-variant-numeric:tabular-nums}.hix .v.sm{font-size:30px;color:var(--ink)}
@@ -293,6 +293,17 @@ function ensureChrome() {
   .crow{display:grid;grid-template-columns:1.6fr 1fr 1fr .8fr;gap:8px;align-items:end;padding:8px 0;border-bottom:1px solid var(--rule)}
   @media (max-width:520px){.crow{grid-template-columns:1fr 1fr .8fr}.crow .cname{grid-column:1/-1}}
   .rsheet{max-width:640px}
+  .cp{position:relative}.cp-in{width:100%;box-sizing:border-box}
+  .cp-list{display:grid;border:1px solid var(--rule);border-radius:8px;margin-top:4px;overflow:hidden;background:#fff}
+  .cp-list button{display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:2px;padding:10px 12px;border:0;border-bottom:1px solid var(--rule);background:#fff;font:15px var(--body);color:var(--ink);cursor:pointer;min-height:44px}
+  .cp-list button small{color:var(--muted);font-size:12px}.cp-list .cp-new{color:var(--green,#1f4d3a);font-weight:600;border-bottom:0}
+  .cp-st{padding:10px 12px;color:var(--muted);font-size:14px}
+  .aform .mscore.one{grid-template-columns:1fr}
+  .aform .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}.aform .three{display:grid;grid-template-columns:1.3fr 1fr 1fr .8fr;gap:8px}
+  @media (max-width:520px){.aform .three{grid-template-columns:1fr 1fr .8fr}.aform .three label:first-child{grid-column:1/-1}}
+  .aform .two label,.aform .three label{min-width:0}.aform .two select,.aform .three input{width:100%;box-sizing:border-box;min-width:0}
+  .crow.auto input{background:#f3f7f2}
+  .box.warn{border-color:#d9a441;background:#fff8e8;margin-bottom:14px;font-size:14px;line-height:1.45}
   .crow label{min-width:0;display:block}.crow input{width:100%;min-width:0;box-sizing:border-box}.crow input::placeholder{color:#b9bfb7}
   .myc tr.strokes td{font-size:12px;color:var(--pine);letter-spacing:-1px}
   @media (min-width:900px){.rsheet{bottom:auto;top:50%;transform:translateY(-50%);border-radius:18px}}
@@ -555,7 +566,17 @@ const sync = {
       data.rounds = merge(data.rounds, r1.data, x => x.id);
       data.scores = merge(data.scores, r2.data, x => x.round_id + ':' + x.hole);
       data.shots = merge(data.shots, r3.data, x => x.id);
-      if (!r5.error) data.posted = merge(data.posted, r5.data, x => x.id);
+      if (!r5.error) {
+        data.posted = merge(data.posted, r5.data, x => x.id);
+        // one time: send scores that were saved while the account tables didn't exist yet
+        const flag = 'yb-posted-sent-' + this.user.id;
+        if (!store.get(flag, false)) {
+          const have = new Set(r5.data.map(x => x.id)), queued = new Set(outbox.filter(o => o.table === 'posted_scores').map(o => o.row.id));
+          data.posted.filter(p => !have.has(p.id) && !queued.has(p.id)).forEach(p => outbox.push({ table: 'posted_scores', op: 'upsert', row: p }));
+          courseCache.filter(c => c.source === 'user' && !c.created_by).forEach(c => outbox.push({ table: 'courses', op: 'upsert', row: courseRow(c) }));
+          store.set(LS_OUTBOX, outbox); store.set(flag, true); this.flushSoon();
+        }
+      } else if (isSetupError(r5.error)) { this.setupNeeded = true; }
       if (r4.data && Array.isArray(r4.data.bag) && r4.data.bag.length) { bag = r4.data.bag; store.set(LS_BAG, bag); }
       if (r4.data && !outbox.some(o => o.table === 'profiles')) {
         ['official_index', 'gender', 'tee_ratings', 'display_name'].forEach(k => { if (r4.data[k] !== undefined && r4.data[k] !== null) profile[k] = r4.data[k]; });
@@ -584,13 +605,19 @@ const sync = {
           const uniq = [...new Map(batch.map(x => [keyOf(x), x])).values()];
           res = await this.client.from(o.table).upsert(o.table === 'profiles' ? uniq[0] : uniq, { onConflict: conflict });
         }
-        if (res.error) { console.warn('sync error', o, res.error); if (/JWT|auth|fetch|network/i.test(res.error.message || '')) break; }
+        if (res.error) {
+          console.warn('sync error', o, res.error);
+          // database not set up yet (table or column missing): keep everything queued until it is
+          if (isSetupError(res.error)) { this.setupNeeded = true; renderProfile(); break; }
+          if (/JWT|auth|fetch|network/i.test(res.error.message || '')) break;
+        } else if (this.setupNeeded && o.table !== 'courses') { this.setupNeeded = false; renderProfile(); }
         outbox.splice(0, n); store.set(LS_OUTBOX, outbox);
       }
     } catch (e) { console.warn('flush stopped', e); }
     this.busy = false; renderAcct();
   }
 };
+function isSetupError(e) { return /^(42P01|42703|PGRST20[45])$/.test(e.code || '') || /does not exist|schema cache/i.test(e.message || ''); }
 function strip(row) { const r = Object.assign({}, row); delete r.user_id; return r; }
 window.addEventListener('online', () => sync.flush());
 
@@ -707,7 +734,8 @@ function renderProfile() {
     const holes = s.kind === '9' ? ' · 9' : s.kind === 'partial' ? ` · ${r.nPlayed}` : '';
     return `<tr class="${crown ? 'go' : 'ext'}" data-id="${esc(r.id)}"><td>${d}</td><td>${esc(s.course || '')}<small>${esc(s.tee ? ' · ' + s.tee : '')}${holes}</small></td><td>${score}</td><td>${s.rating != null ? (+(s.shownRating ?? s.rating)).toFixed(1) + '/' + s.slope : '–'}</td><td class="df ${r.inBest ? 'best' : ''}">${diff}${r.esr ? '*' : ''}</td></tr>${r.notes.length || r.status ? `<tr class="note"><td></td><td colspan="4">${esc([r.status].concat(r.notes).filter(Boolean).join(' · '))}</td></tr>` : ''}`;
   };
-  el.innerHTML = `
+  const setupNote = sync.user && sync.setupNeeded ? `<div class="box warn"><b>Scores aren't saving to your account yet.</b> They're safe on this device and will upload automatically once the database update (supabase/003_courses.sql) has been run.</div>` : '';
+  el.innerHTML = `${setupNote}
   <div class="pgrid">
     <div class="box">
       <h2>${esc(name)}</h2>
@@ -766,35 +794,71 @@ function openAddScore() {
     <div class="seg3" style="display:flex;gap:6px;margin-bottom:10px"><button class="rb" data-m="score" aria-pressed="true">Score at a course</button><button class="rb" data-m="diff" aria-pressed="false">Differential from GHIN</button></div>
     <form id="asf" class="aform">
       <label>Date<input type="date" id="asDate" value="${today}" required></label>
-      <label>Course<input id="asCourse" placeholder="e.g. Elmbrook" required></label>
-      <div class="mscore"><label>Tee<input id="asTee" placeholder="e.g. White"></label>
-        <label>Holes<select id="asHoles"><option value="18">18</option><option value="9">9</option></select></label>
-        <label>Adjusted score<input id="asAgs" inputmode="numeric" placeholder="e.g. 88"></label>
-        <label>Course rating<input id="asCr" inputmode="decimal" placeholder="e.g. 70.4"></label>
-        <label>Slope<input id="asSl" inputmode="numeric" placeholder="e.g. 128"></label>
-        <label>Par<input id="asPar" inputmode="numeric" value="72"></label>
-        <p class="rm">Cap each hole at net double bogey (par + 2 + your strokes on that hole) before adding up. For 9 holes, use the 9-hole rating and slope from the scorecard.</p></div>
+      <label>Course<div id="asCoursePick"></div></label>
+      <div class="mscore one">
+        <div class="two"><label>Tee<select id="asTee"><option value="">Pick a course first</option></select></label>
+        <label>Holes<select id="asHoles"><option value="18">18</option><option value="9">9</option></select></label></div>
+        <label>Score<input id="asAgs" inputmode="numeric" placeholder="e.g. 88"></label>
+        <p class="rm" id="asRtg"></p>
+        <div id="asManual" hidden>
+          <div class="three"><label id="asTeeNameL">Tee name<input id="asTeeName" placeholder="e.g. White"></label>
+          <label>Rating<input id="asCr" inputmode="decimal" placeholder="70.4"></label>
+          <label>Slope<input id="asSl" inputmode="numeric" placeholder="128"></label>
+          <label>Par<input id="asPar" inputmode="numeric" value="72"></label></div>
+          <p class="rm">From the scorecard or GHIN's course lookup. Enter the 18-hole numbers; it's saved to the course list so nobody has to type it again.</p>
+        </div>
+      </div>
       <div class="mdiff" hidden><label>Score Differential<input id="asDiff" inputmode="decimal" placeholder="e.g. 14.2"></label>
-        <p class="rm">In the GHIN app, your score history shows the differential for each round. Entering your last 20 here gives the app the same record GHIN uses.</p></div>
+        <p class="rm">In the GHIN app, your score history shows the differential for each round.</p></div>
       <p class="rm" id="asErr" style="color:var(--flag)"></p>
       <div class="rbtns"><button class="rb main" type="submit">Add score</button></div>
     </form>`);
-  let mode = 'score';
+  let mode = 'score', course = null, manual = false;
+  const sel = $('asTee');
+  const showTee = () => {
+    const holes = +$('asHoles').value, opt = sel.value;
+    manual = !course || course.isNew || opt === '__other' || opt === '__edit' || !teesForGender(course).length;
+    $('asManual').hidden = !manual || !course;
+    $('asTeeNameL').hidden = !(course && (course.isNew || opt === '__other' || !teesForGender(course).length));
+    if (!course) { $('asRtg').textContent = ''; return; }
+    if (manual) { $('asRtg').textContent = course.isNew || !teesForGender(course).length ? 'New course: add its rating and slope once.' : ''; return; }
+    const t = teeFor(teesForGender(course)[+opt], holes);
+    $('asRtg').innerHTML = `Rating ${(+t.rating).toFixed(1)} · Slope ${t.slope} · Par ${t.par}${t.derived ? ' (9-hole, from the 18)' : ''} · <a href="#" id="asEdit">fix</a>`;
+    $('asEdit').onclick = ev => { ev.preventDefault(); const raw = teesForGender(course)[+opt]; sel.insertAdjacentHTML('beforeend', '<option value="__edit">' + esc(raw.name) + ' (edited)</option>'); sel.value = '__edit'; $('asTeeName').value = raw.name; $('asCr').value = raw.rating; $('asSl').value = raw.slope; $('asPar').value = raw.par || 72; showTee(); };
+  };
+  coursePicker($('asCoursePick'), { onPick: c => {
+    course = c;
+    const tees = c ? teesForGender(c) : [];
+    sel.innerHTML = c ? tees.map((t, i) => `<option value="${i}">${esc(t.name)}${t.yards ? ' · ' + t.yards + ' yds' : ''}</option>`).join('') + `<option value="__other">${tees.length ? 'Other tee…' : 'Enter tee'}</option>` : '<option value="">Pick a course first</option>';
+    if (c && tees.length) { const want = (profile.lastTees || {})[c.id]; const i = tees.findIndex(t => t.name === want); sel.value = String(i >= 0 ? i : 0); }
+    showTee();
+  } });
+  sel.onchange = showTee; $('asHoles').onchange = showTee;
   document.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { mode = b.dataset.m; document.querySelectorAll('[data-m]').forEach(x => x.setAttribute('aria-pressed', x.dataset.m === mode)); document.querySelector('.mscore').hidden = mode !== 'score'; document.querySelector('.mdiff').hidden = mode !== 'diff'; });
   $('asf').onsubmit = e => {
     e.preventDefault();
     const err = m => { $('asErr').textContent = m; };
-    const date = $('asDate').value, course = $('asCourse').value.trim();
-    if (!date || !course) return err('Add a date and course.');
-    const p = { id: uuid(), played_on: new Date(date + 'T12:00:00').toISOString(), course, tee: null, holes: 18, gross: null, ags: null, course_rating: null, slope: null, par: null, differential: null };
+    const date = $('asDate').value, courseName = (course && course.name) || document.querySelector('#asCoursePick .cp-in').value.trim();
+    if (!date || !courseName) return err('Add a date and course.');
+    const p = { id: uuid(), played_on: new Date(date + 'T12:00:00').toISOString(), course: courseName, course_id: null, tee: null, holes: 18, gross: null, ags: null, course_rating: null, slope: null, par: null, differential: null };
     if (mode === 'diff') {
       const d = parseFloat($('asDiff').value.replace('+', '-')); if (isNaN(d) || d < -10 || d > 80) return err('Enter the differential, like 14.2.');
       p.differential = d;
     } else {
-      const ags = parseInt($('asAgs').value, 10), cr = parseFloat($('asCr').value), sl = parseInt($('asSl').value, 10), par = parseInt($('asPar').value, 10) || 72, holes = +$('asHoles').value;
-      if (!ags || !cr || !sl) return err('Add the score, course rating and slope.');
-      if (sl < 55 || sl > 155) return err('Slope is usually between 55 and 155.');
-      Object.assign(p, { tee: $('asTee').value.trim() || null, holes, ags, gross: ags, course_rating: cr, slope: sl, par });
+      if (!course) return err('Pick the course from the list, or add it as a new course.');
+      const ags = parseInt($('asAgs').value, 10), holes = +$('asHoles').value;
+      if (!ags || ags < 25 || ags > 200) return err('Add your score.');
+      let t, c = course;
+      if (manual) {
+        const cr = parseFloat($('asCr').value), sl = parseInt($('asSl').value, 10), par = parseInt($('asPar').value, 10) || 72;
+        const tn = $('asTeeName').value.trim() || (sel.value === '__edit' ? teesForGender(course)[0].name : '');
+        if (!cr || !sl) return err('Add the course rating and slope.');
+        if (sl < 55 || sl > 155 || cr < 55 || cr > 80) return err('Use the 18-hole rating (usually 60–78) and slope (55–155).');
+        c = saveUserCourse(course.name, { name: tn || 'Tee', rating: cr, slope: sl, par, holes: 18 }, course) || course;
+        t = teeFor({ name: tn || 'Tee', rating: cr, slope: sl, par, holes: 18 }, holes);
+      } else t = teeFor(teesForGender(course)[+sel.value], holes);
+      profile.lastTees = Object.assign({}, profile.lastTees, { [c.id]: t.name }); store.set(LS_PROFILE, profile);
+      Object.assign(p, { course: c.name, course_id: c.id && !/^(crown|tmp-)/.test(c.id) && (c.source !== 'user' || sync.user) ? c.id : null, tee: t.name, holes, ags, gross: ags, course_rating: t.rating, slope: t.slope, par: t.par });
     }
     upsertPosted(p); closeSheet(); render(); toast('Score added');
   };
@@ -813,6 +877,104 @@ function openRatings() {
   $('rtReset').onclick = () => { if (profile.tee_ratings) delete profile.tee_ratings[g]; saveProfileLocal(); closeSheet(); render(); };
 }
 
+
+
+/* ------------------------------------------------------------------ course database (shared) */
+const LS_COURSES = 'yb-courses-v1';
+let courseCache = store.get(LS_COURSES, []), courseApiOff = false;
+const STOP = /\b(the|golf|club|course|country|cc|gc|g\.c\.|resort|spa|and|links|at|of)\b/g;
+const normName = s => String(s || '').toLowerCase().replace(/&/g, ' ').replace(/[^a-z0-9 ]+/g, ' ').replace(STOP, ' ').replace(/\s+/g, ' ').trim();
+function crownCourse() {
+  const seed = courseCache.find(c => c.source_id === 'seed:the-crown');
+  const tees = [];
+  ['M', 'F'].forEach(g => ['Black', 'Blue', 'Blue/White', 'White'].forEach(t => { const rs = ratingFor(t, g); if (rs) tees.push({ name: t, gender: g, rating: rs[0], slope: rs[1], par: 72, holes: 18 }); }));
+  return { id: seed ? seed.id : 'crown', name: 'The Crown Golf Club', city: 'Traverse City', state: 'MI', tees, source: 'seed', source_id: 'seed:the-crown' };
+}
+function allCourses() { return [crownCourse()].concat(courseCache.filter(c => c.source_id !== 'seed:the-crown')); }
+function cacheCourses(list) {
+  const m = new Map(courseCache.map(c => [c.id, c]));
+  (list || []).forEach(c => { if (c && c.id) m.set(c.id, c); });
+  courseCache = [...m.values()].slice(-400); store.set(LS_COURSES, courseCache);
+}
+function matchScore(q, c) {
+  const a = normName(q), b = normName(c.name);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (b.includes(a) || a.includes(b)) return 0.85;
+  const ta = a.split(' '), tb = new Set(b.split(' '));
+  return ta.filter(t => tb.has(t)).length / Math.max(ta.length, tb.size) * 0.8;
+}
+const courseLabel = c => c.name + (c.city ? ` · ${c.city}${c.state ? ', ' + c.state : ''}` : '');
+async function searchCourses(q, opts = {}) {
+  q = String(q || '').trim();
+  const rank = () => allCourses().map(c => [c, matchScore(q, c)]).filter(x => x[1] >= 0.4).sort((a, b) => b[1] - a[1]);
+  if (q.length < 3) return rank();
+  if (sync.enabled) {
+    // look in the shared table by the most distinctive word, then rank here
+    const word = normName(q).split(' ').sort((a, b) => b.length - a.length)[0] || q;
+    try { const { data, error } = await sync.client.from('courses').select('*').ilike('name', '%' + word.replace(/[%_]/g, '') + '%').limit(25); if (!error) cacheCourses(data); } catch (e) { /* offline */ }
+  }
+  let r = rank();
+  if ((!r.length || r[0][1] < 0.85) && opts.lookup !== false && sync.user && !courseApiOff) {
+    try {
+      const { data, error } = await sync.client.functions.invoke('course-lookup', { body: { q } });
+      if (error) { const st = error.context && error.context.status; if (!st || st === 404 || st === 501 || st === 429) courseApiOff = true; }
+      else if (data && data.courses) { cacheCourses(data.courses.filter(c => c.id)); if (data.courses.some(c => !c.id)) courseCache.push(...data.courses.filter(c => !c.id).map(c => Object.assign({ id: 'tmp-' + uuid() }, c))); }
+    } catch (e) { courseApiOff = true; }
+    r = rank();
+  }
+  return r;
+}
+function pickTee(course, teeName, gender, holes) {
+  if (!course || !course.tees || !course.tees.length) return null;
+  const g = gender || profile.gender || 'M', n = String(teeName || '').toLowerCase().trim();
+  let pool = course.tees.filter(t => t.gender === g); if (!pool.length) pool = course.tees;
+  let t = n ? (pool.find(x => x.name.toLowerCase() === n) || pool.find(x => x.name.toLowerCase().startsWith(n) || n.startsWith(x.name.toLowerCase()))) : null;
+  if (!t) return null;
+  return teeFor(t, holes);
+}
+// ratings for the holes actually played (9-hole round on an 18-hole rating: half the rating and par, same slope)
+function teeFor(t, holes) {
+  const full = t.holes !== 9;
+  if (holes === 9 && full) return { name: t.name, rating: Math.round(t.rating * 5) / 10, slope: t.slope, par: Math.round((t.par || 72) / 2), derived: true };
+  return { name: t.name, rating: +t.rating, slope: +t.slope, par: t.par || (holes === 9 ? 36 : 72) };
+}
+function teesForGender(course) { const g = profile.gender || 'M'; const p = (course.tees || []).filter(t => t.gender === g); return p.length ? p : (course.tees || []); }
+// save a course/tee a golfer typed in, so nobody has to type it again
+function saveUserCourse(name, tee, existing) {
+  name = String(name || '').trim(); if (!name || !tee || !tee.rating || !tee.slope) return null;
+  const row = { name, gender: profile.gender || 'M', rating: +tee.rating, slope: +tee.slope, par: tee.par || 72, holes: tee.holes || 18 };
+  row.name = (tee.name || 'Tee').trim();
+  let c = existing && existing.source === 'user' && (!existing.created_by || (sync.user && existing.created_by === sync.user.id)) ? existing
+    : courseCache.find(x => x.source === 'user' && normName(x.name) === normName(name) && (!x.created_by || (sync.user && x.created_by === sync.user.id)));
+  if (!c) c = { id: uuid(), name, city: null, state: null, country: null, tees: [], source: 'user', updated_at: nowIso() };
+  c = Object.assign({}, c, { tees: (c.tees || []).filter(t => !(t.name.toLowerCase() === row.name.toLowerCase() && t.gender === row.gender && (t.holes || 18) === row.holes)).concat([row]), updated_at: nowIso() });
+  cacheCourses([c]);
+  if (sync.user) queue('courses', 'upsert', courseRow(c));
+  return c;
+}
+const courseRow = c => ({ id: c.id, name: c.name, city: c.city || null, state: c.state || null, country: c.country || null, tees: c.tees, source: 'user', updated_at: c.updated_at });
+
+/* course search box: type, pick from the list, or add a new course */
+function coursePicker(host, { value = '', onPick }) {
+  host.innerHTML = `<div class="cp"><input class="cp-in" placeholder="Search for a course" autocomplete="off" value="${esc(value)}"><div class="cp-list" hidden></div></div>`;
+  const inp = host.querySelector('.cp-in'), list = host.querySelector('.cp-list');
+  let t = null, seq = 0;
+  const show = async () => {
+    const q = inp.value.trim(), my = ++seq;
+    if (q.length < 2) { list.hidden = true; return; }
+    list.hidden = false; list.innerHTML = `<div class="cp-st">Searching…</div>`;
+    const r = await searchCourses(q);
+    if (my !== seq) return;
+    list.innerHTML = r.slice(0, 6).map(([c], i) => `<button type="button" data-i="${i}"><b>${esc(c.name)}</b><small>${esc([c.city, c.state].filter(Boolean).join(', '))}${c.tees && c.tees.length ? ' · ' + teesForGender(c).length + ' tees' : ''}</small></button>`).join('')
+      + `<button type="button" data-new="1" class="cp-new">+ Add “${esc(q)}” as a new course</button>`;
+    list.querySelectorAll('[data-i]').forEach(b => b.onclick = () => { const c = r[+b.dataset.i][0]; inp.value = c.name; list.hidden = true; onPick(c); });
+    list.querySelector('[data-new]').onclick = () => { list.hidden = true; onPick({ id: null, name: q, tees: [], isNew: true }); };
+  };
+  inp.oninput = () => { clearTimeout(t); t = setTimeout(show, 300); onPick(null); };
+  inp.onfocus = () => { if (inp.value.trim().length >= 2 && list.hidden) show(); };
+  return inp;
+}
 
 /* ------------------------------------------------------------------ bulk import */
 const LS_LASTIMPORT = 'yb-last-import';
@@ -850,7 +1012,7 @@ function openPaste() {
   $('impGo').onclick = () => { const t = $('impText').value; if (t.trim()) fromText(t, 'paste'); };
 }
 function openGrid(prefill) {
-  const courses = Array.from(new Set(data.posted.map(p => p.course).filter(Boolean).concat(Object.keys(savedCourses()).map(k => k.split('|')[0])))).slice(0, 50);
+  const courses = Array.from(new Set(data.posted.map(p => p.course).filter(Boolean).concat(allCourses().map(c => c.name)))).slice(0, 80);
   const rowHtml = (r = {}) => `<tr><td><input type="date" class="g-date" value="${r.date ? r.date.slice(0, 10) : ''}"></td><td><input class="g-course" list="impCourses" value="${esc(r.course || '')}" placeholder="Course"></td><td><input class="g-tee" value="${esc(r.tee || '')}" placeholder="Tee"></td><td><input class="g-score" inputmode="numeric" value="${r.score ?? ''}" placeholder="88"></td><td><select class="g-holes"><option ${r.holes === 9 ? '' : 'selected'}>18</option><option ${r.holes === 9 ? 'selected' : ''}>9</option></select></td></tr>`;
   openSheet(`<h3>Type in scores</h3><p class="rm">Course names fill in as you type. Leave a row blank to skip it.</p>
     <datalist id="impCourses">${courses.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
@@ -914,24 +1076,41 @@ function review() {
   $('impBack').onclick = () => imp.src === 'grid' ? openGrid(imp.items) : imp.src === 'paste' ? openPaste() : openImport();
   $('impNext').onclick = ratingsStep;
 }
-function ratingsStep() {
+async function ratingsStep() {
   const ready = imp.items.filter(i => !i.errors.length && !i.dup);
   const groups = new Map();
   ready.filter(i => i.diff == null && (i.rating == null || i.slope == null)).forEach(i => {
     const k = YBImport.courseKey(i.course, i.tee) + '|' + i.holes;
-    if (!groups.has(k)) groups.set(k, { course: i.course, tee: i.tee, holes: i.holes, n: 0, known: knownRating(i.course, i.tee) });
+    if (!groups.has(k)) groups.set(k, { course: i.course, tee: i.tee, holes: i.holes, n: 0 });
     groups.get(k).n++;
   });
   if (!groups.size) return doImport({});
+  // look each course up once: shared course list first, then the course database lookup
+  const names = [...new Set([...groups.values()].map(g => g.course || ''))].filter(Boolean);
+  openSheet(`<h3>Course ratings</h3><p class="rm" id="lkSt">Looking up ${names.length} course${names.length === 1 ? '' : 's'}…</p>`);
+  const found = {};
+  for (let i = 0; i < names.length; i++) {
+    if ($('lkSt')) $('lkSt').textContent = `Looking up courses… ${i + 1} of ${names.length}`;
+    const res = await searchCourses(names[i]);
+    if (res.length && res[0][1] >= 0.8) found[names[i]] = res[0][0];
+  }
+  if (!imp) return;   // sheet closed while looking up
   const gs = [...groups.entries()].sort((a, b) => (b[1].holes - a[1].holes) || (b[1].n - a[1].n));
+  gs.forEach(([, g]) => {
+    g.match = found[g.course || ''] || null;
+    g.tee18 = g.match ? pickTee(g.match, g.tee, null, 18) : null;
+    g.auto = g.match ? pickTee(g.match, g.tee, null, g.holes) : null;
+    if (!g.auto) { const kn = knownRating(g.course, g.tee); if (kn) { g.auto = teeFor({ name: g.tee || 'Tee', rating: kn.rating, slope: kn.slope, par: kn.par, holes: 18 }, g.holes); g.saved = true; } }
+  });
+  const nAuto = gs.filter(([, g]) => g.auto).length;
   openSheet(`<h3>Course ratings</h3>
-    <p class="rm">Enter each course's rating and slope once, from the scorecard or GHIN's course lookup.${gs.some(([, g]) => g.holes === 9) ? ' Leave 9-hole rows blank to use half the 18-hole rating for that course.' : ''} Leave a course blank to skip its rounds for now.</p>
+    <p class="rm">${nAuto === gs.length ? 'Found every course. Check the numbers look right, then import.' : nAuto ? `Found ${nAuto} of ${gs.length}. Add rating and slope for the rest once and they're saved to the course list for next time.` : `Add each course's rating and slope once (scorecard or GHIN course lookup). They're saved to the course list for next time.`}${gs.some(([, g]) => g.holes === 9) ? ' 9-hole rows left blank use half the 18-hole rating.' : ''}</p>
     <form id="rtgForm" class="aform">${gs.map(([k, g], i) => {
-      const kn = g.known && g.holes === 18 ? g.known : null;
-      return `<div class="crow"><div class="cname"><b>${esc(g.course || 'Unnamed course')}</b>${g.tee ? ' · ' + esc(g.tee) : ''}${g.holes === 9 ? ' · 9 holes' : ''}<br><small class="rm">${g.n} round${g.n === 1 ? '' : 's'}</small></div>
-        <label>Rating<input id="cr${i}" inputmode="decimal" value="${kn ? kn.rating : ''}" placeholder="${g.holes === 9 ? '35.4' : '70.8'}"></label>
-        <label>Slope<input id="cs${i}" inputmode="numeric" value="${kn ? kn.slope : ''}" placeholder="125"></label>
-        <label>Par<input id="cp${i}" inputmode="numeric" value="${kn ? kn.par || 72 : (g.holes === 9 ? 36 : 72)}"></label></div>`; }).join('')}
+      const a = g.auto, src = a ? (g.saved ? 'saved earlier' : g.match.source === 'golfcourseapi' ? 'course database' : g.match.source === 'seed' ? 'built in' : 'course list') : '';
+      return `<div class="crow ${a ? 'auto' : ''}"><div class="cname"><b>${esc(g.course || 'Unnamed course')}</b>${g.tee ? ' · ' + esc(g.tee) : ''}${g.holes === 9 ? ' · 9 holes' : ''}<br><small class="rm">${g.n} round${g.n === 1 ? '' : 's'}${a ? ` · ✓ ${esc(g.match && !g.saved ? g.match.name + ' ' : '')}${esc(a.name || '')} (${src}${a.derived ? ', half of 18' : ''})` : g.match && !g.tee18 ? ` · ${esc(g.match.name)} found, but no “${esc(g.tee || '')}” tee` : ''}</small></div>
+        <label>Rating<input id="cr${i}" inputmode="decimal" value="${a ? (+a.rating).toFixed(1) : ''}" placeholder="${g.holes === 9 ? '35.4' : '70.8'}"></label>
+        <label>Slope<input id="cs${i}" inputmode="numeric" value="${a ? a.slope : ''}" placeholder="125"></label>
+        <label>Par<input id="cp${i}" inputmode="numeric" value="${a ? a.par : (g.holes === 9 ? 36 : 72)}"></label></div>`; }).join('')}
       <p class="rm" id="rtgErr" style="color:var(--flag)"></p>
       <div class="rbtns"><button class="rb ghost" type="button" id="impBack">Back</button><button class="rb main" type="submit">Import</button></div></form>`);
   $('impBack').onclick = review;
@@ -941,12 +1120,14 @@ function ratingsStep() {
     for (let i = 0; i < gs.length; i++) {
       const [k, g] = gs[i]; const cr = parseFloat($('cr' + i).value), sl = parseInt($('cs' + i).value, 10), par = parseInt($('cp' + i).value, 10) || (g.holes === 9 ? 36 : 72);
       if (!cr && !sl) {
-        // 9-hole group left blank: derive from the same course/tee's 18-hole numbers
-        if (g.holes === 9) { const full = rmap[YBImport.courseKey(g.course, g.tee) + '|18'] || knownRating(g.course, g.tee); if (full) rmap[k] = { rating: Math.round(full.rating * 5) / 10, slope: full.slope, par: Math.round((full.par || 72) / 2) }; }
+        if (g.holes === 9) { const full = rmap[YBImport.courseKey(g.course, g.tee) + '|18']; if (full) rmap[k] = Object.assign(teeFor({ name: g.tee, rating: full.rating, slope: full.slope, par: full.par, holes: 18 }, 9), { course: full.course }); }
         continue;
       }
       if (!cr || !sl || sl < 55 || sl > 155 || (g.holes === 18 && (cr < 55 || cr > 80)) || (g.holes === 9 && (cr < 27 || cr > 40))) { $('rtgErr').textContent = `Check the rating and slope for ${g.course || 'that course'}.`; return; }
-      rmap[k] = { rating: cr, slope: sl, par };
+      let course = g.match;
+      const changed = !g.auto || Math.abs(g.auto.rating - cr) > .05 || g.auto.slope !== sl;
+      if (changed && g.holes === 18 && g.course) course = saveUserCourse(g.course, { name: g.tee || 'Tee', rating: cr, slope: sl, par, holes: 18 }, g.match && g.match.source === 'user' ? g.match : null) || course;
+      rmap[k] = { rating: cr, slope: sl, par, course };
       if (g.holes === 18) rememberCourse(YBImport.courseKey(g.course, g.tee), { rating: cr, slope: sl, par });
     }
     doImport(rmap);
@@ -962,6 +1143,7 @@ function doImport(rmap) {
       const r = (i.rating != null && i.slope != null) ? { rating: i.rating, slope: i.slope, par: i.par || (i.holes === 9 ? 36 : 72) } : rmap[YBImport.courseKey(i.course, i.tee) + '|' + i.holes];
       if (!r) { skipped++; return; }
       Object.assign(p, { gross: i.score, ags: i.score, course_rating: r.rating, slope: r.slope, par: r.par });
+      const c = r.course; if (c && c.id && !/^(crown|tmp-)/.test(c.id) && (c.source !== 'user' || sync.user)) p.course_id = c.id;
     }
     p.updated_at = nowIso(); data.posted.push(p); outbox.push({ table: 'posted_scores', op: 'upsert', row: p }); ids.push(p.id);
   });

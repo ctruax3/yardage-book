@@ -1,3 +1,4 @@
+-- SUPERSEDED: run 003_courses.sql instead (it includes everything here).
 -- Yardage Book: handicap tracking. Run once in the Supabase SQL editor after schema.sql. Safe to re-run.
 
 alter table public.profiles add column if not exists official_index numeric(4,1);
