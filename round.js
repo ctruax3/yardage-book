@@ -295,6 +295,7 @@ function ensureChrome() {
   .rsheet{max-width:640px}
   .pastwrap{position:absolute;left:10px;bottom:58px;z-index:3;display:flex;gap:6px;flex-wrap:wrap}.pastwrap[hidden]{display:none}
   .pastwrap .chip[aria-pressed="false"]{opacity:.6;text-decoration:line-through}
+  .howto{background:#f3f7f2;border:1px solid var(--rule);border-radius:10px;padding:10px 12px;font-size:14px;line-height:1.45}.howto summary{cursor:pointer;font-weight:700;color:var(--ink)}.howto ol{margin:0;padding-left:18px;display:grid;gap:4px}
   .trwrap{display:flex;justify-content:center;margin:8px 0;background:#0f1a15;border-radius:10px;overflow:hidden}
   .trwrap canvas{touch-action:manipulation;cursor:crosshair;display:block}
   .trlist{display:grid;gap:6px;margin:8px 0}.trrow{display:grid;grid-template-columns:1fr auto 1.3fr;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--rule)}
@@ -608,15 +609,36 @@ function fit2(i1, i2, w1, w2) {
   return p => { const z = [p[0], -p[1]]; return [a[0] * z[0] - a[1] * z[1] + b[0], a[0] * z[1] + a[1] * z[0] + b[1]]; };
 }
 let tr = null;
+const HOWTO_SVG = `<svg viewBox="0 0 120 200" width="96" height="160" aria-hidden="true" style="flex:0 0 auto;border-radius:10px;background:#3d6b45">
+  <ellipse cx="60" cy="34" rx="18" ry="12" fill="#6fae63"/><circle cx="60" cy="34" r="3" fill="#fff"/>
+  <path d="M60 178 L74 112 L56 46" fill="none" stroke="#ffd23f" stroke-width="2.5"/>
+  <g fill="#2a8cf0"><path d="M60 162a9 9 0 1 1 0.1 0L60 178z"/><path d="M74 96a9 9 0 1 1 0.1 0L74 112z"/><path d="M56 30a9 9 0 1 1 0.1 0L56 46z" opacity=".001"/></g>
+  <g fill="#fff"><circle cx="60" cy="153" r="3.5"/><circle cx="74" cy="87" r="3.5"/></g>
+  <circle cx="60" cy="190" r="4" fill="#fff" stroke="#14241d"/>
+  <text x="68" y="194" font-size="9" fill="#fff" font-family="sans-serif">tee</text>
+  <text x="80" y="38" font-size="9" fill="#fff" font-family="sans-serif">green</text>
+  <text x="86" y="92" font-size="9" fill="#fff" font-family="sans-serif">shots</text></svg>`;
+function traceHowto(open) {
+  return `<details class="howto" ${open ? 'open' : ''}><summary>How to get the screenshot from 18Birdies</summary>
+    <div style="display:flex;gap:12px;align-items:flex-start;margin-top:8px">${HOWTO_SVG}
+    <ol>
+      <li>In 18Birdies, open a round where you tracked shots (from your round history) and go to the hole.</li>
+      <li>Your shots show as <b>blue pins</b> joined by a yellow line, with labels like “251 Yds Dr”.</li>
+      <li>Pinch to fit the hole so the <b>tee marker</b>, <b>every pin</b> and the <b>green</b> are on screen. Keep north-up or tee-at-bottom, either works.</li>
+      <li>Take a screenshot (side button + volume up). One screenshot per hole.</li>
+      <li>Here, pick the date, the tees you played and the hole, then choose the screenshot.</li>
+    </ol></div>
+    <p class="rm" style="margin:6px 0 0">The app finds the blue pins for you. You tap the tee icon and the middle of the green so it can line the picture up with the course.</p></details>`;
+}
 function openTrace(hole) {
   const today = new Date().toISOString().slice(0, 10);
   const tees = ['Black', 'Blue', 'Blue/White', 'White'];
   const last = store.get('yb-trace-last', {});
   openSheet(`<h3>Add shots from a screenshot</h3>
-    <p class="rm">In 18Birdies, open the round, go to the hole's shot view and take a screenshot. Pick it here, then tap the tee, the green and each spot your ball finished.</p>
-    <form id="trf" class="aform">
+    ${traceHowto(!last.date)}
+    <form id="trf" class="aform" style="margin-top:10px">
       <div class="two"><label>Date played<input type="date" id="trDate" value="${last.date || today}" max="${today}"></label>
-      <label>Tees<select id="trTee">${tees.map(t => `<option ${t === (last.tee || YB.tee()) ? 'selected' : ''}>${t}</option>`).join('')}</select></label></div>
+      <label>Tees you played<select id="trTee">${tees.map(t => `<option ${t === (last.tee || YB.tee()) ? 'selected' : ''}>${t}</option>`).join('')}</select></label></div>
       <label>Hole<select id="trHole">${YB.H.map(h => `<option value="${h.n}" ${h.n === hole ? 'selected' : ''}>${h.n} · par ${h.par}</option>`).join('')}</select></label>
       <label class="rb main impfile" style="text-align:center">Choose screenshot<input type="file" id="trFile" accept="image/*" hidden></label>
     </form>`);
@@ -624,69 +646,109 @@ function openTrace(hole) {
     const f = e.target.files[0]; if (!f) return;
     const img = new Image();
     img.onload = () => {
-      tr = { img, hole: +$('trHole').value, date: $('trDate').value, tee: $('trTee').value, taps: [], clubs: [] };
+      tr = { img, hole: +$('trHole').value, date: $('trDate').value, tee: $('trTee').value, anchors: [], pts: [], clubs: [], found: findPins(img) };
       store.set('yb-trace-last', { date: tr.date, tee: tr.tee });
       traceScreen();
     };
     img.src = URL.createObjectURL(f);
   };
 }
+// find 18Birdies shot pins: solid blue teardrops with a white centre; the shot spot is the pin's point
+function findPins(img) {
+  try {
+    const W = Math.min(660, img.width), k = W / img.width, H = Math.round(img.height * k);
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const x = c.getContext('2d'); x.drawImage(img, 0, 0, W, H);
+    const d = x.getImageData(0, 0, W, H).data, m = new Uint8Array(W * H);
+    for (let i = 0; i < W * H; i++) { const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2]; m[i] = b > 195 && r < 100 && g > 95 && g < 195 && b - r > 130 ? 1 : 0; }
+    const pins = [], stack = [];
+    for (let i = 0; i < W * H; i++) {
+      if (m[i] !== 1) continue;
+      let n = 0, x0 = W, x1 = 0, y0 = H, y1 = 0, tipX = 0, tipN = 0; stack.push(i); m[i] = 2;
+      while (stack.length) {
+        const j = stack.pop(), px = j % W, py = (j - px) / W; n++;
+        if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py;
+        if (py > y1) { y1 = py; tipX = px; tipN = 1; } else if (py === y1) { tipX += px; tipN++; }
+        if (px > 0 && m[j - 1] === 1) { m[j - 1] = 2; stack.push(j - 1); }
+        if (px < W - 1 && m[j + 1] === 1) { m[j + 1] = 2; stack.push(j + 1); }
+        if (py > 0 && m[j - W] === 1) { m[j - W] = 2; stack.push(j - W); }
+        if (py < H - 1 && m[j + W] === 1) { m[j + W] = 2; stack.push(j + W); }
+      }
+      const w = x1 - x0 + 1, h = y1 - y0 + 1, fill = n / (w * h);
+      if (w > W * 0.045 && w < W * 0.11 && h / w > 1.1 && h / w < 1.6 && fill > 0.35 && fill < 0.75) pins.push([tipX / tipN / k, (y1 + 1) / k]);
+    }
+    return pins;
+  } catch (e) { return []; }
+}
+// put points in playing order: along the line from the tee to the green
+function orderPts(pts) {
+  const [a, b] = tr.anchors, v = [b[0] - a[0], b[1] - a[1]];
+  return pts.slice().sort((p, q) => ((p[0] - a[0]) * v[0] + (p[1] - a[1]) * v[1]) - ((q[0] - a[0]) * v[0] + (q[1] - a[1]) * v[1]));
+}
 function traceScreen() {
-  openSheet(`<h3 id="trTitle">Hole ${tr.hole}</h3>
+  openSheet(`<h3>Hole ${tr.hole}</h3>
     <p class="rm" id="trHint"></p>
     <div class="trwrap"><canvas id="trCan"></canvas></div>
     <div class="rbtns"><button class="rb ghost" id="trUndo">Undo</button><button class="rb main" id="trDone" disabled>Next</button></div>`);
-  document.querySelector('.rsheet') && document.querySelector('.rsheet').classList.add('wide');
   const can = $('trCan'), img = tr.img;
   const maxW = Math.min(can.parentElement.clientWidth || 360, 600), maxH = Math.max(320, innerHeight * 0.62);
-  const k = Math.min(maxW / img.width, maxH / img.height);
-  const dpr = devicePixelRatio || 1;
+  const k = Math.min(maxW / img.width, maxH / img.height), dpr = devicePixelRatio || 1;
   can.style.width = img.width * k + 'px'; can.style.height = img.height * k + 'px';
   can.width = Math.round(img.width * k * dpr); can.height = Math.round(img.height * k * dpr);
-  const ctx = can.getContext('2d');
+  const ctx = can.getContext('2d'), hist = [];
+  const mark = (p, lab, fill, fg) => { ctx.fillStyle = fill; ctx.strokeStyle = '#14241d'; ctx.lineWidth = 2.5 * dpr; ctx.beginPath(); ctx.arc(p[0], p[1], 9 * dpr, 0, 7); ctx.fill(); ctx.stroke(); ctx.fillStyle = fg; ctx.font = `700 ${11 * dpr}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(lab, p[0], p[1] + .5); };
   const draw = () => {
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(img, 0, 0, can.width, can.height);
     const sc = can.width / img.width, P = t => [t[0] * sc, t[1] * sc];
-    ctx.lineWidth = 2.5 * dpr;
-    if (tr.taps.length > 2) { ctx.strokeStyle = '#ffd23f'; ctx.beginPath(); [tr.taps[0]].concat(tr.taps.slice(2)).forEach((t, i) => { const p = P(t); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }); ctx.stroke(); }
-    tr.taps.forEach((t, i) => {
-      const p = P(t), lab = i === 0 ? 'T' : i === 1 ? 'G' : String(i - 1);
-      ctx.fillStyle = i === 0 ? '#ffffff' : i === 1 ? '#d23b2a' : '#ffd23f'; ctx.strokeStyle = '#14241d';
-      ctx.beginPath(); ctx.arc(p[0], p[1], 9 * dpr, 0, 7); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = i === 1 ? '#fff' : '#14241d'; ctx.font = `700 ${11 * dpr}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(lab, p[0], p[1] + .5);
-    });
-    const n = tr.taps.length;
-    $('trHint').innerHTML = n === 0 ? '<b>1.</b> Tap the <b>tee</b> (where your first shot started).'
-      : n === 1 ? '<b>2.</b> Tap the <b>middle of the green</b>.'
-      : `<b>3.</b> Tap where <b>shot ${n - 1}</b> finished, in order. ${n > 2 ? 'Tap <b>Next</b> after the last one.' : ''}`;
-    $('trDone').disabled = n < 3; $('trUndo').disabled = !n;
+    if (tr.pts.length > 1) { ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2.5 * dpr; ctx.beginPath(); tr.pts.forEach((t, i) => { const p = P(t); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }); ctx.stroke(); }
+    if (tr.anchors[0]) mark(P(tr.anchors[0]), 'T', '#fff', '#14241d');
+    if (tr.anchors[1]) mark(P(tr.anchors[1]), 'G', '#d23b2a', '#fff');
+    tr.pts.forEach((t, i) => mark(P(t), String(i + 1), '#ffd23f', '#14241d'));
+    const a = tr.anchors.length, n = tr.pts.length;
+    $('trHint').innerHTML = a === 0 ? '<b>1.</b> Tap the small white <b>tee icon</b> (it marks the back tee, behind your first pin).'
+      : a === 1 ? '<b>2.</b> Tap the <b>middle of the green</b> (18Birdies shows a small grey dot there).'
+      : (tr.auto ? `Found <b>${tr.auto} shot${tr.auto === 1 ? '' : 's'}</b> from the blue pins. ` : 'Tap the <b>point of each blue pin</b> (where each shot was hit). ')
+        + 'Tap a number to remove it, or tap the picture to add a spot, like where your last ball finished.';
+    $('trDone').disabled = a < 2 || n < 2; $('trUndo').disabled = !hist.length && !a;
   };
   can.onclick = ev => {
-    const r = can.getBoundingClientRect();
-    tr.taps.push([(ev.clientX - r.left) / r.width * img.width, (ev.clientY - r.top) / r.height * img.height]);
-    if (tr.taps.length > 14) tr.taps.length = 14;
+    const r = can.getBoundingClientRect(), p = [(ev.clientX - r.left) / r.width * img.width, (ev.clientY - r.top) / r.height * img.height];
+    if (tr.anchors.length < 2) {
+      tr.anchors.push(p); hist.push('a');
+      if (tr.anchors.length === 2 && !tr.pts.length && tr.found.length) { tr.pts = orderPts(tr.found); tr.auto = tr.pts.length; hist.push('auto'); }
+    } else {
+      const near = 14 / (r.width / img.width), hit = tr.pts.findIndex(q => Math.hypot(q[0] - p[0], q[1] - p[1]) < near);
+      if (hit >= 0) { hist.push(['del', tr.pts[hit]]); tr.pts.splice(hit, 1); }
+      else { hist.push(['add', p]); tr.pts = orderPts(tr.pts.concat([p])); }
+    }
     draw();
   };
-  $('trUndo').onclick = () => { tr.taps.pop(); draw(); };
+  $('trUndo').onclick = () => {
+    const h = hist.pop();
+    if (h === 'auto') { tr.pts = []; tr.auto = 0; tr.anchors.pop(); hist.pop(); }
+    else if (h === 'a' || !h) tr.anchors.pop();
+    else if (h[0] === 'add') tr.pts = tr.pts.filter(q => q !== h[1] && !(q[0] === h[1][0] && q[1] === h[1][1]));
+    else tr.pts = orderPts(tr.pts.concat([h[1]]));
+    draw();
+  };
   $('trDone').onclick = traceReview;
   draw();
 }
 function traceShots() {
-  const h = YB.H[tr.hole - 1], g = YB.geom(h, tr.tee);
-  const f = fit2(tr.taps[0], tr.taps[1], g.tee, g.gc); if (!f) return null;
-  const ends = tr.taps.slice(2).map(f);
-  return { g, pts: [g.tee].concat(ends) };   // shot i starts at pts[i]
+  // 18Birdies' tee icon is always the back (Black) tee, whatever tees are shown at the top
+  const h = YB.H[tr.hole - 1], g = YB.geom(h, 'Black');
+  const f = fit2(tr.anchors[0], tr.anchors[1], g.tee, g.gc); if (!f) return null;
+  return { g, pts: tr.pts.map(f) };   // shot i is hit from pts[i]
 }
 function traceReview() {
   const res = traceShots(); if (!res) { toast('Tap the tee and green in different spots'); return; }
   const { g, pts } = res, n = pts.length - 1;
   const onGreen = g.poly && inPoly(pts[n], g.poly);
-  const len = distYd(g.tee, g.gc);
   const clubs = bag && bag.length ? bag : ['Driver', '3W', '5W', 'Hybrid', '4i', '5i', '6i', '7i', '8i', '9i', 'PW', 'GW', 'SW', 'LW', 'Putter'];
   openSheet(`<h3>Hole ${tr.hole} · ${n} shot${n === 1 ? '' : 's'}</h3>
-    <p class="rm">${onGreen ? 'Last ball finished on the green.' : 'Last ball finished off the green (chip-in or a hole you picked up on).'} Add clubs if you know them; they're optional.</p>
+    <p class="rm">Check the yardages match 18Birdies' labels and pick the clubs it shows (optional).</p>
     <div class="trlist">${pts.slice(0, n).map((p, i) => `<div class="trrow"><span>Shot ${i + 1}</span><b>${distYd(p, pts[i + 1])} yd</b><select data-c="${i}"><option value="">Club</option>${clubs.map(c => `<option ${tr.clubs[i] === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>`).join('')}</div>
-    <p class="rm">${tr.tee} tee to green: ${len} yd. If the distances look off, go back and redo the tee and green taps.</p>
+    <p class="rm">${onGreen ? 'The last spot is on the green.' : `The last spot is ${distYd(pts[n], g.gc)} yd from the middle of the green.`} If the yardages are well off, go back and redo the tee icon and green taps.</p>
     <div class="rbtns"><button class="rb ghost" id="trBack">Back</button><button class="rb main" id="trSave">Save shots</button></div>`);
   document.querySelectorAll('[data-c]').forEach(s => s.onchange = () => { tr.clubs[+s.dataset.c] = s.value || null; });
   $('trBack').onclick = traceScreen;
@@ -977,7 +1039,7 @@ function renderProfile() {
   const traced = data.rounds.filter(x => x.course === COURSE_ID && isImported(x)).sort((a, b) => b.started_at.localeCompare(a.started_at));
   const ownShots = data.rounds.filter(x => x.course === COURSE_ID && !isImported(x)).reduce((t, x) => t + new Set(roundShots(x.id).map(s => s.hole)).size, 0);
   el.insertAdjacentHTML('beforeend', `<div class="box" style="margin-top:12px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">Shot history</h2><button class="rb" id="pfTrace">Add shots from a screenshot</button></div>
-    <p class="rm">Past shots show faintly on each hole you've played. Use <b>Past shots</b> on the hole view to hide them for that hole.${ownShots ? ` ${ownShots} hole${ownShots === 1 ? '' : 's'} tracked with this app.` : ''}</p>
+    <p class="rm">Past shots show faintly on each hole you've played. Use <b>Past shots</b> on the hole view to hide them for that hole. Shots tracked in 18Birdies can be added from a screenshot of each hole; the button walks you through it.${ownShots ? ` ${ownShots} hole${ownShots === 1 ? '' : 's'} tracked with this app.` : ''}</p>
     ${traced.length ? `<table class="pt"><tbody>${traced.map(x => { const holes = [...new Set(roundShots(x.id).map(s => s.hole))].sort((a, b) => a - b); return `<tr><td>${new Date(x.started_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit', timeZone: 'UTC' })}</td><td>${esc(x.tee || '')}<small> · from screenshots</small></td><td><small>${holes.length ? 'holes ' + holes.join(', ') : 'no shots'}</small></td><td><button class="rb ghost" data-deltr="${x.id}" style="min-height:34px;padding:6px 10px">Delete</button></td></tr>`; }).join('')}</tbody></table>` : ''}</div>`);
   $('pfTrace').onclick = () => openTrace(1);
   el.querySelectorAll('[data-deltr]').forEach(b => b.onclick = () => { const x = data.rounds.find(y => y.id === b.dataset.deltr); if (!x) return;
