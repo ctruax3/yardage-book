@@ -298,6 +298,7 @@ function ensureChrome() {
   .howto{background:#f3f7f2;border:1px solid var(--rule);border-radius:10px;padding:10px 12px;font-size:14px;line-height:1.45}.howto summary{cursor:pointer;font-weight:700;color:var(--ink)}.howto ol{margin:0;padding-left:18px;display:grid;gap:4px}
   .trwrap{display:flex;justify-content:center;margin:8px 0;background:#0f1a15;border-radius:10px;overflow:hidden}
   .trwrap canvas{touch-action:none;cursor:crosshair;display:block}
+  .hbtn{min-width:34px;height:34px;margin:2px;border:1px solid var(--rule);border-radius:8px;background:var(--card);font:700 15px var(--display);cursor:pointer}
   .trov{display:flex;gap:8px;align-items:center;font-size:14px;color:var(--muted);margin:2px 0 6px}
   .trlist{display:grid;gap:6px;margin:8px 0}.trrow{display:grid;grid-template-columns:1fr auto 1.3fr;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--rule)}
   .trrow select{font:15px var(--body);padding:8px;border:1px solid var(--rule);border-radius:8px;min-height:40px;background:#fff}
@@ -783,17 +784,107 @@ function traceShots() {
 }
 function traceReview() {
   const res = traceShots(); if (!res) { toast('Tap the tee and green in different spots'); return; }
-  const { g, pts } = res, n = pts.length - 1;
-  const onGreen = g.poly && inPoly(pts[n], g.poly);
-  const clubs = bag && bag.length ? bag : ['Driver', '3W', '5W', 'Hybrid', '4i', '5i', '6i', '7i', '8i', '9i', 'PW', 'GW', 'SW', 'LW', 'Putter'];
-  openSheet(`<h3>Hole ${tr.hole} · ${n} shot${n === 1 ? '' : 's'}</h3>
-    <p class="rm">Check the yardages match 18Birdies' labels and pick the clubs it shows (optional).</p>
-    <div class="trlist">${pts.slice(0, n).map((p, i) => `<div class="trrow"><span>Shot ${i + 1}</span><b>${distYd(p, pts[i + 1])} yd</b><select data-c="${i}"><option value="">Club</option>${clubs.map(c => `<option ${tr.clubs[i] === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>`).join('')}</div>
-    <p class="rm">${onGreen ? 'The last spot is on the green.' : `The last spot is ${distYd(pts[n], g.gc)} yd from the middle of the green.`} If the yardages are well off, go back and redo the tee icon and green taps.</p>
-    <div class="rbtns"><button class="rb ghost" id="trBack">Back</button><button class="rb main" id="trSave">Save shots</button></div>`);
-  document.querySelectorAll('[data-c]').forEach(s => s.onchange = () => { tr.clubs[+s.dataset.c] = s.value || null; });
-  $('trBack').onclick = traceScreen;
-  $('trSave').onclick = () => saveTrace(pts, onGreen);
+  const g = res.g, imgToW = fit2(tr.anchors[0], tr.anchors[1], g.tee, g.gc);
+  shotEditor({
+    hole: tr.hole, pts: res.pts, clubs: tr.clubs, img: tr.img, imgToW,
+    title: `Hole ${tr.hole} · check on the course map`,
+    back: traceScreen,
+    save: (pts, clubs, onGreen) => { tr.clubs = clubs; saveTrace(pts, onGreen); }
+  });
+}
+/* Shots drawn on this app's own hole map (fairways, greens, bunkers), with the 18Birdies screenshot laid over it.
+   Drag a shot to move it, tap it to remove it, tap the map to add one. */
+function shotEditor(o) {
+  const h = YB.H[o.hole - 1], g = YB.geom(h, 'Black'), F = YB.course.features || {};
+  let pts = o.pts.map(p => p.slice()); const clubs = (o.clubs || []).slice(); const hist = [];
+  const clubList = bag && bag.length ? bag : ['Driver', '3W', '5W', 'Hybrid', '4i', '5i', '6i', '7i', '8i', '9i', 'PW', 'GW', 'SW', 'LW', 'Putter'];
+  openSheet(`<h3>${esc(o.title)}</h3>
+    <p class="rm">This is the app's own map of hole ${o.hole}. ${o.img ? 'Your screenshot is laid over it; slide to fade it in and out and check the bunkers and green match. ' : ''}Drag a shot to move it, tap it to remove it, tap the map to add one.</p>
+    <div class="trwrap"><canvas id="seCan"></canvas></div>
+    ${o.img ? `<label class="trov">Screenshot <input type="range" id="seOp" min="0" max="100" value="45" style="flex:1"></label>` : ''}
+    <div class="trlist" id="seList"></div>
+    <p class="rm" id="seNote"></p>
+    <div class="rbtns">${o.back ? '<button class="rb ghost" id="seBack">Back</button>' : ''}<button class="rb ghost" id="seUndo">Undo</button><button class="rb main" id="seSave">Save shots</button></div>`);
+  const can = $('seCan'), ctx = can.getContext('2d'), dpr = devicePixelRatio || 1;
+  // frame: tee at the bottom, green at the top, everything on the hole in view
+  const ang = Math.atan2(g.gc[0] - g.tee[0], g.gc[1] - g.tee[1]);   // bearing tee -> green
+  const rot = p => { const x = p[0], y = p[1], c = Math.cos(ang), s = Math.sin(ang); return [x * c - y * s, x * s + y * c]; };   // course -> "up the hole"
+  const unrot = q => { const c = Math.cos(-ang), s = Math.sin(-ang); return [q[0] * c - q[1] * s, q[0] * s + q[1] * c]; };
+  const W = Math.min(can.parentElement.clientWidth || 360, 560), Hh = Math.max(340, Math.min(innerHeight * 0.55, 620));
+  can.style.width = W + 'px'; can.style.height = Hh + 'px'; can.width = Math.round(W * dpr); can.height = Math.round(Hh * dpr);
+  const frame = () => {
+    const all = [g.tee, g.gc].concat(pts).map(rot);
+    let x0 = Math.min(...all.map(p => p[0])), x1 = Math.max(...all.map(p => p[0])), y0 = Math.min(...all.map(p => p[1])), y1 = Math.max(...all.map(p => p[1]));
+    const pad = 40; x0 -= pad; x1 += pad; y0 -= pad; y1 += pad;
+    const sc = Math.min(can.width / (x1 - x0), can.height / (y1 - y0)), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    return { sc, cx, cy };
+  };
+  const fr = frame();   // fixed while editing so things don't jump around
+  const toS = p => { const q = rot(p); return [can.width / 2 + (q[0] - fr.cx) * fr.sc, can.height / 2 - (q[1] - fr.cy) * fr.sc]; };
+  const toW = s => unrot([(s[0] - can.width / 2) / fr.sc + fr.cx, -(s[1] - can.height / 2) / fr.sc + fr.cy]);
+  const poly = (pl, fill, stroke, lw) => { ctx.beginPath(); pl.forEach((w, i) => { const p = toS(w); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }); ctx.closePath(); if (fill) { ctx.fillStyle = fill; ctx.fill(); } if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw * dpr; ctx.stroke(); } };
+  const draw = () => {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#6fa363'; ctx.fillRect(0, 0, can.width, can.height);
+    (F.fairways || []).forEach(pl => poly(pl, '#8fc477', null));
+    (F.water || []).forEach(pl => poly(pl, '#5e9bc4', null));
+    (F.greens || []).forEach(pl => poly(pl, '#a9de8e', '#2f6b3a', 1.2));
+    (F.bunkers || []).forEach(pl => poly(pl, '#ead9a8', '#b9a46c', 1));
+    // screenshot on top, placed with the tee/green alignment
+    const op = o.img && $('seOp') ? +$('seOp').value / 100 : 0;
+    if (o.img && op > 0 && o.imgToW) {
+      const a = toS(o.imgToW([0, 0])), b = toS(o.imgToW([1, 0])), c = toS(o.imgToW([0, 1]));
+      ctx.save(); ctx.globalAlpha = op; ctx.setTransform(b[0] - a[0], b[1] - a[1], c[0] - a[0], c[1] - a[1], a[0], a[1]); ctx.drawImage(o.img, 0, 0); ctx.restore();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+    // centre line, tee, flag
+    ctx.setLineDash([5 * dpr, 5 * dpr]); ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1.2 * dpr;
+    ctx.beginPath(); h.line.forEach((w, i) => { const p = toS(w); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }); ctx.stroke(); ctx.setLineDash([]);
+    const t = toS(g.tee); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#14241d'; ctx.lineWidth = 2 * dpr; ctx.beginPath(); ctx.arc(t[0], t[1], 6 * dpr, 0, 7); ctx.fill(); ctx.stroke();
+    const f = toS(g.gc); ctx.strokeStyle = '#fff'; ctx.beginPath(); ctx.moveTo(f[0], f[1]); ctx.lineTo(f[0], f[1] - 22 * dpr); ctx.stroke(); ctx.fillStyle = '#d23b2a'; ctx.beginPath(); ctx.moveTo(f[0], f[1] - 22 * dpr); ctx.lineTo(f[0] + 12 * dpr, f[1] - 18 * dpr); ctx.lineTo(f[0], f[1] - 14 * dpr); ctx.fill();
+    // shots
+    if (pts.length > 1) { ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2.5 * dpr; ctx.beginPath(); pts.forEach((w, i) => { const p = toS(w); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }); ctx.stroke(); }
+    ctx.font = `700 ${11 * dpr}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (let i = 1; i < pts.length; i++) { const a = toS(pts[i - 1]), b = toS(pts[i]), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], txt = distYd(pts[i - 1], pts[i]) + ' yd'; const w = ctx.measureText(txt).width + 8 * dpr; ctx.fillStyle = 'rgba(20,36,29,.85)'; ctx.fillRect(m[0] + 8 * dpr, m[1] - 9 * dpr, w, 18 * dpr); ctx.fillStyle = '#fff'; ctx.fillText(txt, m[0] + 8 * dpr + w / 2, m[1] + .5); }
+    pts.forEach((w, i) => { const p = toS(w); ctx.fillStyle = '#ffd23f'; ctx.strokeStyle = '#14241d'; ctx.lineWidth = 2.5 * dpr; ctx.beginPath(); ctx.arc(p[0], p[1], 10 * dpr, 0, 7); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#14241d'; ctx.fillText(String(i + 1), p[0], p[1] + .5); });
+    list();
+  };
+  const list = () => {
+    const n = pts.length - 1;
+    $('seList').innerHTML = n < 1 ? '' : pts.slice(0, n).map((p, i) => `<div class="trrow"><span>Shot ${i + 1}</span><b>${distYd(p, pts[i + 1])} yd</b><select data-c="${i}"><option value="">Club</option>${clubList.map(c => `<option ${clubs[i] === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>`).join('');
+    $('seList').querySelectorAll('[data-c]').forEach(s => s.onchange = () => { clubs[+s.dataset.c] = s.value || null; });
+    const last = pts[pts.length - 1], onG = last && g.poly && inPoly(last, g.poly);
+    $('seNote').textContent = !last ? '' : onG ? 'The last spot is on the green.' : `The last spot is ${distYd(last, g.gc)} yd from the middle of the green.`;
+    $('seSave').disabled = pts.length < 2; $('seUndo').disabled = !hist.length;
+  };
+  const order = arr => { const v = [g.gc[0] - g.tee[0], g.gc[1] - g.tee[1]]; return arr.slice().sort((p, q) => ((p[0] - g.tee[0]) * v[0] + (p[1] - g.tee[1]) * v[1]) - ((q[0] - g.tee[0]) * v[0] + (q[1] - g.tee[1]) * v[1])); };
+  const snap = () => hist.push(pts.map(p => p.slice()));
+  const toCan = ev => { const r = can.getBoundingClientRect(); return [(ev.clientX - r.left) * can.width / r.width, (ev.clientY - r.top) * can.height / r.height]; };
+  let drag = null;
+  can.onpointerdown = ev => { can.setPointerCapture && can.setPointerCapture(ev.pointerId); const s = toCan(ev); const i = pts.findIndex(w => { const p = toS(w); return Math.hypot(p[0] - s[0], p[1] - s[1]) < 22 * dpr; }); drag = { i, x: ev.clientX, y: ev.clientY, moved: false }; };
+  can.onpointermove = ev => { if (!drag || drag.i < 0) return; if (!drag.moved) { if (Math.hypot(ev.clientX - drag.x, ev.clientY - drag.y) < 6) return; snap(); drag.moved = true; } ev.preventDefault(); pts[drag.i] = toW(toCan(ev)); draw(); };
+  can.onpointerup = ev => { const d = drag; drag = null; if (!d) return; if (d.moved) { pts = order(pts); draw(); return; } snap(); if (d.i >= 0) { pts.splice(d.i, 1); clubs.splice(d.i, 1); } else pts = order(pts.concat([toW(toCan(ev))])); draw(); };
+  can.onpointercancel = () => { drag = null; };
+  if ($('seOp')) $('seOp').oninput = draw;
+  $('seUndo').onclick = () => { const s = hist.pop(); if (s) { pts = s; draw(); } };
+  if ($('seBack')) $('seBack').onclick = o.back;
+  $('seSave').onclick = () => { const last = pts[pts.length - 1]; o.save(pts, clubs, !!(g.poly && inPoly(last, g.poly))); };
+  draw();
+}
+// fix shots already traced: open them on the course map
+function editTracedHole(roundId, hole) {
+  const r = data.rounds.find(x => x.id === roundId); if (!r) return;
+  const shots = roundShots(roundId, hole).filter(s => s.lat != null);
+  shotEditor({
+    hole, pts: shots.map(s => G.toEN(s.lat, s.lon)), clubs: shots.map(s => s.club),
+    title: `Hole ${hole} · ${new Date(r.started_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })}`,
+    save: (pts, clubs, onGreen) => {
+      roundShots(roundId, hole).forEach(removeShot);
+      pts.forEach((en, i) => { const ll = G.toLL(en[0], en[1]), last = i === pts.length - 1;
+        addShot({ id: uuid(), round_id: roundId, hole, seq: i + 1, kind: last ? (onGreen ? 'ongreen' : 'end') : 'shot', club: last ? null : (clubs[i] || null), lat: +ll[0].toFixed(7), lon: +ll[1].toFixed(7), accuracy: null, source: '18birdies', taken_at: r.started_at, weather: null }); });
+      closeSheet(); YB.refresh(); render(); toast(`Updated hole ${hole}`);
+    }
+  });
 }
 function saveTrace(pts, onGreen) {
   const day = tr.date || new Date().toISOString().slice(0, 10), when = new Date(day + 'T12:00:00').toISOString();
@@ -1081,9 +1172,10 @@ function renderProfile() {
   const traced = data.rounds.filter(x => x.course === COURSE_ID && isImported(x)).sort((a, b) => b.started_at.localeCompare(a.started_at));
   const ownShots = data.rounds.filter(x => x.course === COURSE_ID && !isImported(x)).reduce((t, x) => t + new Set(roundShots(x.id).map(s => s.hole)).size, 0);
   el.insertAdjacentHTML('beforeend', `<div class="box" style="margin-top:12px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">Shot history</h2><button class="rb" id="pfTrace">Add shots from a screenshot</button></div>
-    <p class="rm">Past shots show faintly on each hole you've played. Use <b>Past shots</b> on the hole view to hide them for that hole. Shots tracked in 18Birdies can be added from a screenshot of each hole; the button walks you through it.${ownShots ? ` ${ownShots} hole${ownShots === 1 ? '' : 's'} tracked with this app.` : ''}</p>
-    ${traced.length ? `<table class="pt"><tbody>${traced.map(x => { const holes = [...new Set(roundShots(x.id).map(s => s.hole))].sort((a, b) => a - b); return `<tr><td>${new Date(x.started_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit', timeZone: 'UTC' })}</td><td>${esc(x.tee || '')}<small> · from screenshots</small></td><td><small>${holes.length ? 'holes ' + holes.join(', ') : 'no shots'}</small></td><td><button class="rb ghost" data-deltr="${x.id}" style="min-height:34px;padding:6px 10px">Delete</button></td></tr>`; }).join('')}</tbody></table>` : ''}</div>`);
+    <p class="rm">Past shots show faintly on each hole you've played. Tap a hole number below to check or move its shots on the course map. Use <b>Past shots</b> on the hole view to hide them for that hole. Shots tracked in 18Birdies can be added from a screenshot of each hole; the button walks you through it.${ownShots ? ` ${ownShots} hole${ownShots === 1 ? '' : 's'} tracked with this app.` : ''}</p>
+    ${traced.length ? `<table class="pt"><tbody>${traced.map(x => { const holes = [...new Set(roundShots(x.id).map(s => s.hole))].sort((a, b) => a - b); return `<tr><td>${new Date(x.started_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit', timeZone: 'UTC' })}</td><td>${esc(x.tee || '')}<small> · from screenshots</small></td><td>${holes.length ? holes.map(n => `<button class="hbtn" data-edit="${x.id}" data-h="${n}">${n}</button>`).join('') : '<small>no shots</small>'}</td><td><button class="rb ghost" data-deltr="${x.id}" style="min-height:34px;padding:6px 10px">Delete</button></td></tr>`; }).join('')}</tbody></table>` : ''}</div>`);
   $('pfTrace').onclick = () => openTrace(1);
+  el.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => editTracedHole(b.dataset.edit, +b.dataset.h));
   el.querySelectorAll('[data-deltr]').forEach(b => b.onclick = () => { const x = data.rounds.find(y => y.id === b.dataset.deltr); if (!x) return;
     openSheet(`<h3>Delete these traced shots?</h3><p class="rm">Removes every shot traced for this date.</p><div class="rbtns"><button class="rb" id="dtYes" style="background:var(--flag);color:#fff;border-color:var(--flag)">Delete</button><button class="rb ghost" id="dtNo">Cancel</button></div>`);
     $('dtYes').onclick = () => { deleteRound(x); closeSheet(); render(); YB.refresh(); }; $('dtNo').onclick = closeSheet; });
