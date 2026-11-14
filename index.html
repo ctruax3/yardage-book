@@ -2,7 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14241d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Crown Yardage">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
 <title>The Crown Yardage Book</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -113,6 +121,52 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 .sc tr.sel td.tc{color:var(--flag);font-weight:700}
 .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:8px}
 .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+
+/* ---------- phone: full-screen app shell ---------- */
+.tabbar,.teechip,.grab{display:none}
+@media (max-width:899px){
+  html,body{height:100%;overflow:hidden;overscroll-behavior:none}
+  body{touch-action:manipulation;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+  input,textarea,select,[contenteditable]{-webkit-user-select:text;user-select:text}
+  .app{height:100dvh;max-width:none;padding:0;gap:0;display:flex;flex-direction:column}
+  header.top{flex:0 0 auto;padding:calc(env(safe-area-inset-top) + 8px) 12px 4px;flex-wrap:nowrap;align-items:center;gap:8px;background:var(--paper)}
+  .brand,.tees{display:none}
+  .teechip{display:flex;align-items:center;gap:7px;position:relative;border:1px solid var(--rule);background:var(--card);border-radius:999px;padding:0 12px 0 10px;height:38px;font:600 15px/1 var(--display);letter-spacing:.04em;text-transform:uppercase;flex:0 0 auto}
+  .teechip i{width:13px;height:13px;border-radius:50%;border:1px solid rgba(0,0,0,.35)}
+  .teechip select{position:absolute;inset:0;opacity:0;font-size:16px}
+  .teechip::after{content:"";width:7px;height:7px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg) translateY(-2px);margin-left:2px}
+  header.top .acct{margin-left:auto;flex-wrap:nowrap}
+  header.top .acct #rProf,header.top .acct #rCardBtn,header.top .acct #rOut,header.top .acct .who,header.top .acct #rIn{display:none}
+  nav.holes{flex:0 0 auto;padding:4px 12px 8px;gap:5px;background:var(--paper)}
+  nav.holes button{min-width:38px;height:38px;font-size:17px}
+  nav.holes button.card{display:none}
+  body[data-view="card"] nav.holes,body[data-view="profile"] nav.holes{display:none}
+  .main#holeView{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:0;position:relative}
+  .stage{flex:1 1 auto;min-height:0;aspect-ratio:auto;max-height:none;height:auto;border-radius:0}
+  .chip{padding:7px 9px;font-size:13px}
+  .tools{gap:5px}
+  .pastwrap{top:52px!important;bottom:auto!important}
+  .rbar{bottom:22px!important}.tapinfo{bottom:24px}
+  .panel{flex:0 0 auto;position:relative;z-index:5;margin-top:-14px;background:var(--card);border-radius:18px 18px 0 0;box-shadow:0 -6px 22px rgba(0,0,0,.16);padding:0 14px 8px;gap:0;max-height:118px;overflow:hidden;transition:max-height .25s ease}
+  .panel.open{position:absolute;left:0;right:0;bottom:0;max-height:78%;overflow:auto;-webkit-overflow-scrolling:touch}
+  .panel .box{border:0;border-radius:0;background:transparent;padding:12px 2px;border-top:1px solid var(--rule)}
+  .panel .box:first-of-type{border-top:0;padding-top:2px}
+  .grab{display:block;width:100%;height:22px;border:0;background:transparent;padding:0;position:sticky;top:0;z-index:2;background:var(--card)}
+  .grab::before{content:"";display:block;width:42px;height:5px;border-radius:3px;background:#c3cbc1;margin:8px auto 0}
+  .panel:not(.open) .facts{display:none}
+  .panel:not(.open) .box~.box{display:none}
+  .panel:not(.open){max-height:none}
+  .num{font-size:52px}
+  .holehead .yds{font-size:30px}
+  #cardView,#profileView{flex:1 1 auto;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;margin:0;border-radius:0;border:0;padding:14px 12px 24px}
+  footer.small{display:none}
+  body[data-view="card"] footer.small{display:block;padding:0 12px 16px;overflow:auto;flex:0 0 auto;max-height:22vh}
+  .tabbar{order:10;display:flex;flex:0 0 auto;background:var(--card);border-top:1px solid var(--rule);padding:4px 6px calc(4px + env(safe-area-inset-bottom))}
+  .tabbar button{flex:1;border:0;background:transparent;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 0 4px;font:600 12px/1 var(--display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);cursor:pointer;min-height:50px}
+  .tabbar svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .tabbar button[aria-current="true"]{color:var(--pine)}
+  .tabbar .live{width:7px;height:7px;border-radius:50%;background:var(--flag);position:absolute;margin:-2px 0 0 18px}
+}
 @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 </style>
 </head>
@@ -123,6 +177,7 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
       <h1>The Crown · Yardage Book</h1>
       <p>Traverse City, Michigan · Par 72 · built from public GIS data</p>
     </div>
+    <label class="teechip" id="teeChip"><i id="teeDot"></i><span id="teeName">Blue</span><select id="teeSel" aria-label="Tees"></select></label>
     <div class="tees" id="tees" role="group" aria-label="Tee"></div>
   </header>
 
@@ -147,7 +202,8 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
       <div class="tapinfo" id="tapinfo"><div><span>Tap the course for distances</span></div></div>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="panel">
+      <button class="grab" id="grab" aria-label="Show hole details" aria-expanded="false"></button>
       <div class="box">
         <div class="holehead">
           <div class="num" id="hNum">1</div>
@@ -187,6 +243,11 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
     <p class="small">Tap a hole to open it. Ratings / slope: Black 72.1 / 137 · Blue 70.0 / 128 · Blue/White 68.3 / 126 · White 66.6 / 119.</p>
   </section>
 
+  <nav class="tabbar" id="tabbar" aria-label="Sections">
+    <button data-go="hole" aria-current="true"><svg viewBox="0 0 24 24"><path d="M7 21V3l10 4-10 4"/><ellipse cx="9" cy="21" rx="6" ry="1.5"/></svg>Course</button>
+    <button data-go="card"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Scorecard</button>
+    <button data-go="profile"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>Profile</button>
+  </nav>
   <footer class="small">
     Distances come from public GIS data and are estimates, so check them against the sprinkler heads on the course. Hazard and green distances are measured along the hole's center line from the back tee and shifted for your tee. Plays-like uses about 1 yard per 3 ft of elevation change. Trees and buildings are as of the April 2015 LiDAR flight.
     Sources: course features © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> (ODbL) · aerial imagery <a href="https://www.usgs.gov/programs/national-geospatial-program/national-map">USGS National Map</a> · 3D trees, buildings and 1 m ground from the 2015 FEMA/NOAA Michigan LiDAR (Grand Traverse County) · 1 m elevation from USGS 3DEP · scorecard yardages via <a href="https://www.golfpass.com/courses/7993-crown-golf-club/scorecard-and-layout">GolfPass</a>.
@@ -197,6 +258,7 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 <script src="handicap.js" defer></script>
 <script src="importer.js" defer></script>
 <script src="round.js" defer></script>
+<script src="shell.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/utils/BufferGeometryUtils.js"></script>

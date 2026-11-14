@@ -297,7 +297,8 @@ function ensureChrome() {
   .pastwrap .chip[aria-pressed="false"]{opacity:.6;text-decoration:line-through}
   .howto{background:#f3f7f2;border:1px solid var(--rule);border-radius:10px;padding:10px 12px;font-size:14px;line-height:1.45}.howto summary{cursor:pointer;font-weight:700;color:var(--ink)}.howto ol{margin:0;padding-left:18px;display:grid;gap:4px}
   .trwrap{display:flex;justify-content:center;margin:8px 0;background:#0f1a15;border-radius:10px;overflow:hidden}
-  .trwrap canvas{touch-action:manipulation;cursor:crosshair;display:block}
+  .trwrap canvas{touch-action:none;cursor:crosshair;display:block}
+  .trov{display:flex;gap:8px;align-items:center;font-size:14px;color:var(--muted);margin:2px 0 6px}
   .trlist{display:grid;gap:6px;margin:8px 0}.trrow{display:grid;grid-template-columns:1fr auto 1.3fr;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--rule)}
   .trrow select{font:15px var(--body);padding:8px;border:1px solid var(--rule);border-radius:8px;min-height:40px;background:#fff}
   .trrow b{font:700 18px var(--display)}
@@ -579,7 +580,7 @@ function buildPast3d(group, THREE, toV) {
     const vs = pts.map(p => toV(p.en[0], p.en[1], 1.2)), arc = [];
     for (let i = 1; i < vs.length; i++) {
       const a = vs[i - 1], b = vs[i], m = a.clone().lerp(b, .5), d = a.distanceTo(b);
-      m.y += d > 25 ? d * 0.18 : d * 0.05;   // full swings arc, chips and putts stay low
+      m.y += d > 25 ? d * 0.12 : d * 0.04;   // full swings arc, chips and putts stay low
       arc.push(...new THREE.QuadraticBezierCurve3(a, m, b).getPoints(20));
       (i === vs.length - 1 ? end : mid).push(b);
     }
@@ -599,15 +600,18 @@ function inPoly(p, poly) {
   }
   return c;
 }
-// similarity transform (scale + rotation + shift) from two matched points; image y points down
-function fit2(i1, i2, w1, w2) {
-  const za = [i1[0], -i1[1]], zb = [i2[0], -i2[1]];
-  const dz = [zb[0] - za[0], zb[1] - za[1]], dw = [w2[0] - w1[0], w2[1] - w1[1]];
-  const den = dz[0] * dz[0] + dz[1] * dz[1]; if (!den) return null;
-  const a = [(dw[0] * dz[0] + dw[1] * dz[1]) / den, (dw[1] * dz[0] - dw[0] * dz[1]) / den];
-  const b = [w1[0] - (a[0] * za[0] - a[1] * za[1]), w1[1] - (a[0] * za[1] + a[1] * za[0])];
-  return p => { const z = [p[0], -p[1]]; return [a[0] * z[0] - a[1] * z[1] + b[0], a[0] * z[1] + a[1] * z[0] + b[1]]; };
+// similarity transform (scale + rotation + shift) from two matched points, as complex numbers
+function sim(a1, a2, b1, b2) {
+  const da = [a2[0] - a1[0], a2[1] - a1[1]], db = [b2[0] - b1[0], b2[1] - b1[1]], den = da[0] * da[0] + da[1] * da[1];
+  if (!den) return null;
+  const m = [(db[0] * da[0] + db[1] * da[1]) / den, (db[1] * da[0] - db[0] * da[1]) / den];
+  return z => [m[0] * (z[0] - a1[0]) - m[1] * (z[1] - a1[1]) + b1[0], m[0] * (z[1] - a1[1]) + m[1] * (z[0] - a1[0]) + b1[1]];
 }
+const flipY = p => [p[0], -p[1]];   // image y points down, map north points up
+// image -> course (east/north metres)
+function fit2(i1, i2, w1, w2) { const f = sim(flipY(i1), flipY(i2), w1, w2); return f && (p => f(flipY(p))); }
+// course -> image
+function fit2inv(i1, i2, w1, w2) { const f = sim(w1, w2, flipY(i1), flipY(i2)); return f && (w => flipY(f(w))); }
 let tr = null;
 const HOWTO_SVG = `<svg viewBox="0 0 120 200" width="96" height="160" aria-hidden="true" style="flex:0 0 auto;border-radius:10px;background:#3d6b45">
   <ellipse cx="60" cy="34" rx="18" ry="12" fill="#6fae63"/><circle cx="60" cy="34" r="3" fill="#fff"/>
@@ -689,48 +693,85 @@ function traceScreen() {
   openSheet(`<h3>Hole ${tr.hole}</h3>
     <p class="rm" id="trHint"></p>
     <div class="trwrap"><canvas id="trCan"></canvas></div>
+    <label class="trov"><input type="checkbox" id="trOv" checked> Show course outlines</label>
     <div class="rbtns"><button class="rb ghost" id="trUndo">Undo</button><button class="rb main" id="trDone" disabled>Next</button></div>`);
   const can = $('trCan'), img = tr.img;
-  const maxW = Math.min(can.parentElement.clientWidth || 360, 600), maxH = Math.max(320, innerHeight * 0.62);
+  const maxW = Math.min(can.parentElement.clientWidth || 360, 600), maxH = Math.max(320, innerHeight * 0.6);
   const k = Math.min(maxW / img.width, maxH / img.height), dpr = devicePixelRatio || 1;
   can.style.width = img.width * k + 'px'; can.style.height = img.height * k + 'px';
   can.width = Math.round(img.width * k * dpr); can.height = Math.round(img.height * k * dpr);
   const ctx = can.getContext('2d'), hist = [];
-  const mark = (p, lab, fill, fg) => { ctx.fillStyle = fill; ctx.strokeStyle = '#14241d'; ctx.lineWidth = 2.5 * dpr; ctx.beginPath(); ctx.arc(p[0], p[1], 9 * dpr, 0, 7); ctx.fill(); ctx.stroke(); ctx.fillStyle = fg; ctx.font = `700 ${11 * dpr}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(lab, p[0], p[1] + .5); };
+  const h = YB.H[tr.hole - 1], g = YB.geom(h, 'Black'), F = YB.course.features || {};
+  // course features near this hole, for the alignment check
+  const near = (poly) => poly.some(p => Math.min(Math.hypot(p[0] - g.tee[0], p[1] - g.tee[1]), Math.hypot(p[0] - g.gc[0], p[1] - g.gc[1]), Math.hypot(p[0] - (g.tee[0] + g.gc[0]) / 2, p[1] - (g.tee[1] + g.gc[1]) / 2)) < 420);
+  const feats = ['fairways', 'bunkers', 'greens', 'water'].flatMap(kind => (F[kind] || []).filter(near).map(poly => ({ kind, poly })));
+  const mark = (p, lab, fill, fg, rad = 9) => { ctx.fillStyle = fill; ctx.strokeStyle = '#14241d'; ctx.lineWidth = 2.5 * dpr; ctx.beginPath(); ctx.arc(p[0], p[1], rad * dpr, 0, 7); ctx.fill(); ctx.stroke(); ctx.fillStyle = fg; ctx.font = `700 ${11 * dpr}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(lab, p[0], p[1] + .5); };
   const draw = () => {
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(img, 0, 0, can.width, can.height);
     const sc = can.width / img.width, P = t => [t[0] * sc, t[1] * sc];
-    if (tr.pts.length > 1) { ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2.5 * dpr; ctx.beginPath(); tr.pts.forEach((t, i) => { const p = P(t); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }); ctx.stroke(); }
-    if (tr.anchors[0]) mark(P(tr.anchors[0]), 'T', '#fff', '#14241d');
-    if (tr.anchors[1]) mark(P(tr.anchors[1]), 'G', '#d23b2a', '#fff');
+    if (tr.anchors.length === 2 && $('trOv').checked) {
+      const inv = fit2inv(tr.anchors[0], tr.anchors[1], g.tee, g.gc);
+      if (inv) {
+        ctx.save(); ctx.lineJoin = 'round';
+        feats.forEach(({ kind, poly }) => {
+          ctx.beginPath(); poly.forEach((w, i) => { const p = P(inv(w)); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }); ctx.closePath();
+          ctx.lineWidth = (kind === 'fairways' ? 1.5 : 2) * dpr;
+          ctx.strokeStyle = kind === 'greens' ? '#ff5bd1' : kind === 'bunkers' ? '#ffffff' : kind === 'water' ? '#5bc8ff' : 'rgba(255,255,255,.55)';
+          ctx.setLineDash(kind === 'fairways' ? [5 * dpr, 4 * dpr] : []); ctx.stroke();
+        });
+        ctx.setLineDash([4 * dpr, 4 * dpr]); ctx.strokeStyle = 'rgba(255,91,209,.9)'; ctx.lineWidth = 1.5 * dpr;
+        ctx.beginPath(); h.line.forEach((w, i) => { const p = P(inv(w)); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }); ctx.stroke();
+        ctx.restore();
+      }
+    }
+    if (tr.pts.length > 1) { ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2.5 * dpr; ctx.setLineDash([]); ctx.beginPath(); tr.pts.forEach((t, i) => { const p = P(t); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }); ctx.stroke(); }
     tr.pts.forEach((t, i) => mark(P(t), String(i + 1), '#ffd23f', '#14241d'));
+    if (tr.anchors[0]) mark(P(tr.anchors[0]), 'T', '#fff', '#14241d', 11);
+    if (tr.anchors[1]) mark(P(tr.anchors[1]), 'G', '#ff5bd1', '#fff', 11);
     const a = tr.anchors.length, n = tr.pts.length;
     $('trHint').innerHTML = a === 0 ? '<b>1.</b> Tap the small white <b>tee icon</b> (it marks the back tee, behind your first pin).'
       : a === 1 ? '<b>2.</b> Tap the <b>middle of the green</b> (18Birdies shows a small grey dot there).'
-      : (tr.auto ? `Found <b>${tr.auto} shot${tr.auto === 1 ? '' : 's'}</b> from the blue pins. ` : 'Tap the <b>point of each blue pin</b> (where each shot was hit). ')
-        + 'Tap a number to remove it, or tap the picture to add a spot, like where your last ball finished.';
-    $('trDone').disabled = a < 2 || n < 2; $('trUndo').disabled = !hist.length && !a;
+      : `<b>3.</b> The <b style="color:#c2189b">pink and white outlines</b> are this app's greens and bunkers. If they don't sit on the ones in your screenshot, <b>drag T and G</b> until they do. `
+        + (tr.auto ? `Found <b>${tr.auto} shot${tr.auto === 1 ? '' : 's'}</b>. ` : 'Tap the point of each blue pin. ') + 'Drag a number to move it, tap it to remove it, tap the picture to add one.';
+    $('trDone').disabled = a < 2 || n < 2; $('trUndo').disabled = !hist.length;
   };
-  can.onclick = ev => {
-    const r = can.getBoundingClientRect(), p = [(ev.clientX - r.left) / r.width * img.width, (ev.clientY - r.top) / r.height * img.height];
-    if (tr.anchors.length < 2) {
-      tr.anchors.push(p); hist.push('a');
-      if (tr.anchors.length === 2 && !tr.pts.length && tr.found.length) { tr.pts = orderPts(tr.found); tr.auto = tr.pts.length; hist.push('auto'); }
-    } else {
-      const near = 14 / (r.width / img.width), hit = tr.pts.findIndex(q => Math.hypot(q[0] - p[0], q[1] - p[1]) < near);
-      if (hit >= 0) { hist.push(['del', tr.pts[hit]]); tr.pts.splice(hit, 1); }
-      else { hist.push(['add', p]); tr.pts = orderPts(tr.pts.concat([p])); }
+  const toImg = ev => { const r = can.getBoundingClientRect(); return [(ev.clientX - r.left) / r.width * img.width, (ev.clientY - r.top) / r.height * img.height]; };
+  const grabR = () => 22 / (can.getBoundingClientRect().width / img.width);   // finger-sized, in image pixels
+  let drag = null;
+  const snap = () => hist.push({ anchors: tr.anchors.map(q => q.slice()), pts: tr.pts.map(q => q.slice()), auto: tr.auto });
+  can.onpointerdown = ev => {
+    const p = toImg(ev), R = grabR(); can.setPointerCapture(ev.pointerId);
+    let target = null;
+    if (tr.anchors.length === 2) {
+      const ai = tr.anchors.findIndex(q => Math.hypot(q[0] - p[0], q[1] - p[1]) < R);
+      if (ai >= 0) target = { kind: 'a', i: ai };
+      else { const pi = tr.pts.findIndex(q => Math.hypot(q[0] - p[0], q[1] - p[1]) < R); if (pi >= 0) target = { kind: 'p', i: pi }; }
     }
+    drag = { start: p, x: ev.clientX, y: ev.clientY, target, moved: false };
+  };
+  can.onpointermove = ev => {
+    if (!drag || !drag.target) return;
+    if (!drag.moved) { if (Math.hypot(ev.clientX - drag.x, ev.clientY - drag.y) < 6) return; snap(); drag.moved = true; }
+    ev.preventDefault();
+    const p = toImg(ev);
+    if (drag.target.kind === 'a') tr.anchors[drag.target.i] = p; else tr.pts[drag.target.i] = p;
     draw();
   };
-  $('trUndo').onclick = () => {
-    const h = hist.pop();
-    if (h === 'auto') { tr.pts = []; tr.auto = 0; tr.anchors.pop(); hist.pop(); }
-    else if (h === 'a' || !h) tr.anchors.pop();
-    else if (h[0] === 'add') tr.pts = tr.pts.filter(q => q !== h[1] && !(q[0] === h[1][0] && q[1] === h[1][1]));
-    else tr.pts = orderPts(tr.pts.concat([h[1]]));
+  can.onpointerup = () => {
+    const d = drag; drag = null; if (!d) return;
+    if (d.moved) { if (d.target.kind === 'p') tr.pts = orderPts(tr.pts); draw(); return; }
+    const p = d.start; snap();
+    if (tr.anchors.length < 2) {
+      tr.anchors.push(p);
+      if (tr.anchors.length === 2 && !tr.pts.length && tr.found.length) { tr.pts = orderPts(tr.found); tr.auto = tr.pts.length; }
+    } else if (d.target && d.target.kind === 'p') tr.pts.splice(d.target.i, 1);
+    else if (!d.target) tr.pts = orderPts(tr.pts.concat([p]));
+    else hist.pop();   // tapped T or G without moving: nothing changes
     draw();
   };
+  can.onpointercancel = () => { drag = null; };
+  $('trOv').onchange = draw;
+  $('trUndo').onclick = () => { const s = hist.pop(); if (!s) return; tr.anchors = s.anchors; tr.pts = s.pts; tr.auto = s.auto; draw(); };
   $('trDone').onclick = traceReview;
   draw();
 }
@@ -1000,6 +1041,7 @@ function renderProfile() {
   <div class="pgrid">
     <div class="box">
       <h2>${esc(name)}</h2>
+      ${sync.enabled ? `<p class="rm acctline">${sync.user ? `Signed in as ${esc(sync.user.email || '')} · <a href="#" id="pfOut">Sign out</a>` : `<button class="rb" id="pfIn">Sign in with Google</button> to keep your scores on every device`}</p>` : ''}
       <div class="hix"><div><div class="k">Handicap Index</div><div class="v">${fmtIx(hc && hc.index)}</div>
         <div class="rm">${hc && hc.index != null ? `From ${hc.counting} score${hc.counting === 1 ? '' : 's'}${hc.counting < 20 ? ' (uses the fewer-than-20 table)' : ', best 8 of the last 20'}` : `Post ${Math.max(0, 3 - (hc ? hc.counting : 0))} more 18-hole score${3 - (hc ? hc.counting : 0) === 1 ? '' : 's'} (or 9-hole pairs) to get an Index`}</div></div>
         <div><div class="k">Low (12 mo)</div><div class="v sm">${fmtIx(hc && hc.low)}</div></div></div>
@@ -1046,6 +1088,8 @@ function renderProfile() {
     openSheet(`<h3>Delete these traced shots?</h3><p class="rm">Removes every shot traced for this date.</p><div class="rbtns"><button class="rb" id="dtYes" style="background:var(--flag);color:#fff;border-color:var(--flag)">Delete</button><button class="rb ghost" id="dtNo">Cancel</button></div>`);
     $('dtYes').onclick = () => { deleteRound(x); closeSheet(); render(); YB.refresh(); }; $('dtNo').onclick = closeSheet; });
   $('pfAdd').onclick = openAddScore;
+  if ($('pfOut')) $('pfOut').onclick = e => { e.preventDefault(); sync.signOut(); };
+  if ($('pfIn')) $('pfIn').onclick = () => sync.signIn();
   $('pfImport').onclick = openImport;
   if ($('pfUndoImp')) $('pfUndoImp').onclick = e => { e.preventDefault(); openSheet(`<h3>Undo last import?</h3><p class="rm">Removes the ${store.get(LS_LASTIMPORT, []).length} scores from your last import${sync.user ? ', including from your account' : ''}.</p><div class="rbtns"><button class="rb" id="uiYes" style="background:var(--flag);color:#fff;border-color:var(--flag)">Remove them</button><button class="rb ghost" id="uiNo">Cancel</button></div>`); $('uiYes').onclick = () => { closeSheet(); undoLastImport(); }; $('uiNo').onclick = closeSheet; };
   $('pfRatings').onclick = openRatings;
