@@ -112,6 +112,7 @@ async function startRound() {
   startGPS();
   location.hash = 'hole-1';
   render();
+  const ch = courseHcp(r.tee); if (ch != null) toast(`Course handicap ${ch < 0 ? '+' + (-ch) : ch} from the ${r.tee} tees`);
   const w = await fetchWeather();
   if (w) { r.weather = w; upsertRound(r); renderBar(); }
 }
@@ -267,6 +268,24 @@ function ensureChrome() {
   .rlist{display:grid;gap:6px;margin-top:8px}
   .rlist button{display:flex;justify-content:space-between;align-items:center;text-transform:none;letter-spacing:0;font:500 15px/1.2 var(--body)}
   .rlist button b{font:700 20px/1 var(--display)}
+  .pgrid{display:grid;gap:12px}@media (min-width:900px){.pgrid{grid-template-columns:1fr 1fr}}
+  .hix{display:flex;gap:24px;align-items:flex-end;margin-bottom:6px}
+  .hix .k,.sgrid .k{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+  .hix .v{font:700 56px/1 var(--display);color:var(--pine);font-variant-numeric:tabular-nums}.hix .v.sm{font-size:30px;color:var(--ink)}
+  .sgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.sgrid>div{border-top:2px solid var(--rule);padding-top:6px}
+  .sgrid .v{font:700 24px/1.1 var(--display);font-variant-numeric:tabular-nums}
+  table.pt{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  table.pt th,table.pt td{padding:7px 6px;border-bottom:1px solid var(--rule);text-align:left;font-size:14px}
+  table.pt th{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}
+  table.pt td.big{font:700 20px/1 var(--display)} table.pt small{color:var(--muted)}
+  table.hist{min-width:420px} table.hist tr.go,table.hist tr.ext{cursor:pointer} table.hist tr.go:hover td,table.hist tr.ext:hover td{background:#eaf0e6}
+  table.hist td.df{font:700 17px/1 var(--display)} table.hist td.df.best{background:#dcefd2;color:var(--pine)}
+  table.hist tr.note td{font-size:12px;color:var(--muted);padding-top:0;border-bottom:1px solid var(--rule)}
+  table.hist tr:has(+ tr.note) td{border-bottom:0}
+  .aform{display:grid;gap:10px}.aform label{display:grid;gap:4px;font-size:13px;font-weight:600;color:var(--muted)}
+  .aform input,.aform select{font:500 17px var(--body);padding:10px;border:1px solid var(--rule);border-radius:8px;background:#fff;color:var(--ink);min-height:44px}
+  .aform .mscore{display:grid;grid-template-columns:1fr 1fr;gap:10px}.aform .mscore p{grid-column:1/-1;margin:0}
+  .myc tr.strokes td{font-size:12px;color:var(--pine);letter-spacing:-1px}
   @media (min-width:900px){.rsheet{bottom:auto;top:50%;transform:translateY(-50%);border-radius:18px}}
   `;
   document.head.appendChild(css);
@@ -277,6 +296,8 @@ function ensureChrome() {
   $('stage').appendChild(bar);
   const acct = document.createElement('div'); acct.className = 'acct'; acct.id = 'rAcct';
   document.querySelector('header.top').appendChild(acct);
+  const pv = document.createElement('section'); pv.id = 'profileView'; pv.hidden = true;
+  $('cardView').after(pv);
   const my = document.createElement('div'); my.className = 'myc'; my.id = 'myCard';
   $('cardView').insertBefore(my, $('cardView').firstChild.nextSibling);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
@@ -314,7 +335,7 @@ function openBag() {
 function renderBar() {
   const bar = $('rBar'); if (!bar) return;
   const r = activeRound();
-  const onHole = !/^#card$/.test(location.hash);
+  const onHole = !/^#(card|profile)$/.test(location.hash);
   bar.hidden = !(r && onHole);
   const ti = $('tapinfo'); if (ti) ti.style.display = (r && onHole) ? 'none' : '';
   if (!r || !onHole) return;
@@ -349,6 +370,8 @@ function renderAcct() {
     const thru = lastPlayedHole(r);
     parts.push(`<button class="rb" id="rCardBtn">Scorecard</button><button class="rb ghost" id="rEnd">End round${thru ? ' · thru ' + thru : ''}</button>`);
   } else parts.push(`<button class="rb main" id="rStart" style="min-height:36px;font-size:15px">Start round</button>`);
+  const hcx = handicap(), ixu = indexInUse();
+  parts.push(`<button class="rb" id="rProf">Profile${ixu ? ' · ' + fmtIx(ixu.v) : ''}</button>`);
   if (sync.enabled) {
     parts.push(sync.user ? `<span class="who">${esc(sync.user.email || 'Signed in')}${outbox.length ? ' · syncing' : ''}</span><button class="rb ghost" id="rOut">Sign out</button>`
       : `<button class="rb" id="rIn">Sign in with Google</button>`);
@@ -360,13 +383,14 @@ function renderAcct() {
     $('rEndYes').onclick = () => { closeSheet(); endRound(); }; $('rEndNo').onclick = closeSheet;
   };
   if ($('rCardBtn')) $('rCardBtn').onclick = () => location.hash = 'card';
+  $('rProf').onclick = () => location.hash = 'profile';
   if ($('rIn')) $('rIn').onclick = () => sync.signIn();
   if ($('rOut')) $('rOut').onclick = () => sync.signOut();
 }
 
 /* ------------------------------------------------------------------ my scorecard view */
 let viewRoundId = null;
-const viewRound = () => data.rounds.find(r => r.id === viewRoundId) || activeRound() || null;
+const viewRound = () => data.rounds.find(r => r.id === viewRoundId) || activeRound() || data.rounds.filter(r => r.course === COURSE_ID).sort((a, b) => b.started_at.localeCompare(a.started_at))[0] || null;
 function totals(r) {
   let s = 0, p = 0, par = 0, n = 0, putts = 0, fwH = 0, fwN = 0;
   for (let i = 1; i <= 18; i++) {
@@ -398,10 +422,14 @@ function renderMyCard() {
   const head = `<tr><th>Hole</th>${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => `<th>${i}</th>`).join('')}<th>Out</th>${[10, 11, 12, 13, 14, 15, 16, 17, 18].map(i => `<th>${i}</th>`).join('')}<th>In</th><th>Tot</th></tr>`;
   const fwCell = i => { const sc = holeScore(r.id, i), h = H[i - 1]; return `<td>${h.par < 4 ? '' : sc && sc.fairway ? (sc.fairway === 'hit' ? '✓' : sc.fairway === 'left' ? '←' : '→') : ''}</td>`; };
   const date = new Date(r.started_at).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const ch = courseHcp(r.tee);
+  const dots = i => { if (ch == null) return '<td></td>'; const k = WHS.strokesOnHole(ch, H[i - 1].hcp); return `<td>${k > 0 ? '•'.repeat(k) : k < 0 ? '+' : ''}</td>`; };
+  let netTxt = '';
+  if (ch != null && t.n) { let rec = 0; for (let i = 1; i <= 18; i++) { const sc = holeScore(r.id, i); if (sc && sc.score != null) rec += WHS.strokesOnHole(ch, H[i - 1].hcp); } const net = t.s - rec; netTxt = ` · net ${net}`; }
   const others = rounds.filter(x => x.id !== r.id).slice(0, 12);
   el.innerHTML = `<h2>${r.status === 'active' ? 'Current round' : 'Round'} · ${date} · ${esc(r.tee || '')}</h2>
-    <p class="rm">${t.n ? `<b style="font:700 22px var(--display);color:var(--ink)">${t.s}</b> through ${t.n} · ${t.rel === 0 ? 'even' : (t.rel > 0 ? '+' : '') + t.rel} · ${t.putts} putts · fairways ${t.fw}` : 'Tap any hole to enter a score.'}</p>
-    <div class="cardview"><table class="sc">${head}${parRow}${fill(row('Score', cell), 'score')}${fill(row('Putts', i => { const sc = holeScore(r.id, i); return `<td>${sc && sc.putts != null ? sc.putts : ''}</td>`; }), 'putts')}${row('Fairway', fwCell).replace('{OUT}', '').replace('{IN}', '').replace('{TOT}', '')}</table></div>
+    <p class="rm">${t.n ? `<b style="font:700 22px var(--display);color:var(--ink)">${t.s}</b> through ${t.n} · ${t.rel === 0 ? 'even' : (t.rel > 0 ? '+' : '') + t.rel}${netTxt} · ${t.putts} putts · fairways ${t.fw}` : 'Tap any hole to enter a score.'}${ch != null ? `<br>Course handicap ${ch < 0 ? '+' + (-ch) : ch} from the ${esc(r.tee || '')} tees · dots show where you get strokes` : ''}</p>
+    <div class="cardview"><table class="sc">${head}${parRow}${ch != null ? row('Strokes', dots).replace('{OUT}', '').replace('{IN}', '').replace('{TOT}', ch).replace('<tr class="">', '<tr class="strokes">') : ''}${fill(row('Score', cell), 'score')}${fill(row('Putts', i => { const sc = holeScore(r.id, i); return `<td>${sc && sc.putts != null ? sc.putts : ''}</td>`; }), 'putts')}${row('Fairway', fwCell).replace('{OUT}', '').replace('{IN}', '').replace('{TOT}', '')}</table></div>
     ${r.status === 'done' ? `<div class="rbtns"><button class="rb ghost" id="rDel">Delete this round</button></div>` : ''}
     ${others.length ? `<h2 style="margin-top:16px">Past rounds</h2><div class="rlist">${others.map(o => { const tt = totals(o); return `<button class="rb" data-r="${o.id}"><span>${new Date(o.started_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} · ${esc(o.tee || '')}${o.status === 'active' ? ' · in progress' : ''}</span><b>${tt.n ? tt.s : '–'}</b></button>`; }).join('')}</div>` : ''}
     <hr style="border:0;border-top:1px solid var(--rule);margin:16px 0">`;
@@ -490,6 +518,7 @@ const sync = {
       data.rounds.forEach(r => outbox.push({ table: 'rounds', op: 'upsert', row: r }));
       data.scores.forEach(s => outbox.push({ table: 'hole_scores', op: 'upsert', row: s }));
       data.shots.forEach(s => outbox.push({ table: 'shots', op: 'upsert', row: s }));
+      data.posted.forEach(s => outbox.push({ table: 'posted_scores', op: 'upsert', row: s }));
       store.set(LS_OUTBOX, outbox); store.set(LS_MERGED, this.user.id);
       this.saveProfile();
     }
@@ -500,11 +529,12 @@ const sync = {
     if (!this.user) return;
     try {
       const c = this.client;
-      const [r1, r2, r3, r4] = await Promise.all([
+      const [r1, r2, r3, r4, r5] = await Promise.all([
         c.from('rounds').select('*').eq('course', COURSE_ID),
         c.from('hole_scores').select('*'),
         c.from('shots').select('*'),
-        c.from('profiles').select('*').maybeSingle()
+        c.from('profiles').select('*').maybeSingle(),
+        c.from('posted_scores').select('*')
       ]);
       if (r1.error || r2.error || r3.error) throw (r1.error || r2.error || r3.error);
       const pendingIds = new Set(outbox.map(o => o.row.id || (o.row.round_id + ':' + o.row.hole)));
@@ -516,11 +546,16 @@ const sync = {
       data.rounds = merge(data.rounds, r1.data, x => x.id);
       data.scores = merge(data.scores, r2.data, x => x.round_id + ':' + x.hole);
       data.shots = merge(data.shots, r3.data, x => x.id);
+      if (!r5.error) data.posted = merge(data.posted, r5.data, x => x.id);
       if (r4.data && Array.isArray(r4.data.bag) && r4.data.bag.length) { bag = r4.data.bag; store.set(LS_BAG, bag); }
+      if (r4.data && !outbox.some(o => o.table === 'profiles')) {
+        ['official_index', 'gender', 'tee_ratings', 'display_name'].forEach(k => { if (r4.data[k] !== undefined && r4.data[k] !== null) profile[k] = r4.data[k]; });
+        store.set(LS_PROFILE, profile);
+      }
       save(); render(); YB.refresh();
     } catch (e) { console.warn('pull failed', e); }
   },
-  saveProfile() { if (this.user) { outbox.push({ table: 'profiles', op: 'upsert', row: { bag, default_tee: YB.tee() } }); store.set(LS_OUTBOX, outbox); this.flushSoon(); } },
+  saveProfile() { if (this.user) { outbox.push({ table: 'profiles', op: 'upsert', row: { bag, default_tee: YB.tee(), official_index: profile.official_index, gender: profile.gender, tee_ratings: profile.tee_ratings, display_name: profile.display_name } }); store.set(LS_OUTBOX, outbox); this.flushSoon(); } },
   flushSoon() { clearTimeout(this.timer); this.timer = setTimeout(() => this.flush(), 600); },
   async flush() {
     if (!this.user || this.busy || !outbox.length || !navigator.onLine) { renderAcct(); return; }
@@ -544,8 +579,222 @@ const sync = {
 function strip(row) { const r = Object.assign({}, row); delete r.user_id; return r; }
 window.addEventListener('online', () => sync.flush());
 
+
+/* ------------------------------------------------------------------ handicap + profile */
+const LS_PROFILE = 'yb-profile-v1';
+// Course Rating / Slope by tee. Men's values from GolfPass; White and women's values from
+// other listings: confirm against your GHIN app and edit on the profile page.
+const DEFAULT_RATINGS = {
+  M: { 'Black': [72.1, 137], 'Blue': [70.0, 128], 'Blue/White': [68.3, 126], 'White': [66.1, 116] },
+  F: { 'Black': null, 'Blue': [76.2, 134], 'Blue/White': null, 'White': [71.4, 126] }
+};
+let profile = Object.assign({ official_index: null, gender: 'M', tee_ratings: null, display_name: null }, store.get(LS_PROFILE, {}));
+data.posted = data.posted || [];
+function saveProfileLocal() { store.set(LS_PROFILE, profile); sync.saveProfile(); }
+function ratingFor(tee, gender) {
+  const g = gender || profile.gender || 'M';
+  const own = profile.tee_ratings && profile.tee_ratings[g] && profile.tee_ratings[g][tee];
+  return own || (DEFAULT_RATINGS[g] && DEFAULT_RATINGS[g][tee]) || null;
+}
+function crownScores() {
+  const out = [];
+  for (const r of data.rounds.filter(x => x.course === COURSE_ID && x.status === 'done')) {
+    const rs = ratingFor(r.tee); if (!rs) continue;
+    const holes = [];
+    for (let i = 1; i <= 18; i++) { const sc = holeScore(r.id, i); if (sc && sc.score != null) holes.push({ n: i, par: YB.H[i - 1].par, si: YB.H[i - 1].hcp, score: sc.score }); }
+    if (holes.length < 9) continue;
+    const front = holes.every(h => h.n <= 9), back = holes.every(h => h.n >= 10);
+    let kind = holes.length === 18 ? '18' : holes.length === 9 && (front || back) ? '9' : holes.length >= 10 ? 'partial' : null;
+    if (!kind) continue;
+    out.push({ id: r.id, date: r.started_at, kind, holes, rating: rs[0], slope: rs[1], par: 72, roundId: r.id, course: 'The Crown', tee: r.tee });
+  }
+  return out;
+}
+function allScores() {
+  return crownScores().concat(data.posted.map(p => p.differential != null && p.ags == null
+    ? { id: p.id, date: p.played_on, kind: 'diff', differential: +p.differential, course: p.course, tee: p.tee, posted: p }
+    : (+p.holes === 9
+      // 9-hole postings carry the 9-hole rating/slope from the card
+      ? { id: p.id, date: p.played_on, kind: '9', ags: +p.ags, gross: p.gross != null ? +p.gross : null, rating: +p.course_rating * 2, slope: +p.slope, par: (+p.par || 36) * 2, ratingPlayed: +p.course_rating, slopePlayed: +p.slope, nHoles: 9, course: p.course, tee: p.tee, posted: p, shownRating: +p.course_rating }
+      : { id: p.id, date: p.played_on, kind: '18', ags: +p.ags, gross: p.gross != null ? +p.gross : null, rating: +p.course_rating, slope: +p.slope, par: +p.par || 72, nHoles: 18, course: p.course, tee: p.tee, posted: p })));
+}
+let hcCache = null;
+function handicap() {
+  if (!window.WHS) return null;
+  hcCache = WHS.compute(allScores(), { startIndex: profile.official_index != null ? +profile.official_index : null });
+  return hcCache;
+}
+// The index used for course handicaps: an official GHIN index if entered, otherwise the app's own
+function indexInUse() {
+  if (profile.official_index != null && profile.official_index !== '') return { v: +profile.official_index, src: 'official' };
+  const h = hcCache || handicap();
+  return h && h.index != null ? { v: h.index, src: 'app' } : null;
+}
+function courseHcp(tee) {
+  const ix = indexInUse(), rs = ratingFor(tee); if (!ix || !rs) return null;
+  return WHS.courseHandicap(ix.v, rs[1], rs[0], 72);
+}
+const fmtIx = v => v == null ? '–' : v < 0 ? '+' + Math.abs(v).toFixed(1) : v.toFixed(1);
+
+function upsertPosted(p) { p.updated_at = nowIso(); const i = data.posted.findIndex(x => x.id === p.id); if (i < 0) data.posted.push(p); else data.posted[i] = p; save(); queue('posted_scores', 'upsert', p); }
+function deletePosted(p) { data.posted = data.posted.filter(x => x.id !== p.id); save(); queue('posted_scores', 'delete', { id: p.id }); }
+
+function stats() {
+  const rounds = data.rounds.filter(r => r.course === COURSE_ID && r.status === 'done');
+  let full = [], putts = [], fwH = 0, fwN = 0, gir = 0, girN = 0; const byPar = { 3: [], 4: [], 5: [] };
+  rounds.forEach(r => {
+    let tot = 0, n = 0, pt = 0, ptn = 0;
+    for (let i = 1; i <= 18; i++) {
+      const sc = holeScore(r.id, i), h = YB.H[i - 1]; if (!sc || sc.score == null) continue;
+      tot += sc.score; n++; byPar[h.par].push(sc.score - h.par);
+      if (sc.putts != null) { pt += sc.putts; ptn++; girN++; if (sc.score - sc.putts <= h.par - 2) gir++; }
+      if (h.par >= 4 && sc.fairway) { fwN++; if (sc.fairway === 'hit') fwH++; }
+    }
+    if (n === 18) { full.push(tot); if (ptn === 18) putts.push(pt); }
+  });
+  const avg = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
+  return { rounds: rounds.length, avg: avg(full), best: full.length ? Math.min(...full) : null, putts: avg(putts),
+    fw: fwN ? Math.round(100 * fwH / fwN) : null, gir: girN ? Math.round(100 * gir / girN) : null,
+    p3: avg(byPar[3]), p4: avg(byPar[4]), p5: avg(byPar[5]) };
+}
+function trendSvg(hist) {
+  if (hist.length < 2) return '';
+  const W = 340, H = 120, l = 30, r = 8, t = 10, b = 20;
+  const xs = hist.map((_, i) => i), ys = hist.map(h => h.index);
+  const lo = Math.floor(Math.min(...ys) - 1), hi = Math.ceil(Math.max(...ys) + 1);
+  const X = i => l + i / (hist.length - 1) * (W - l - r), Y = v => t + (1 - (v - lo) / (hi - lo)) * (H - t - b);
+  const path = hist.map((h, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(h.index).toFixed(1)).join(' ');
+  let grid = ''; const step = (hi - lo) > 10 ? 5 : 2;
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) grid += `<line x1="${l}" x2="${W - r}" y1="${Y(v)}" y2="${Y(v)}" stroke="#d3dacf"/><text x="${l - 5}" y="${Y(v) + 3.5}" font-size="10" text-anchor="end" fill="#5b6b62">${v}</text>`;
+  const d0 = new Date(hist[0].date).toLocaleDateString(undefined, { month: 'short', year: '2-digit' }), d1 = new Date(hist[hist.length - 1].date).toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+  const last = hist[hist.length - 1];
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="Handicap Index over time">${grid}
+    <path d="${path} L${X(hist.length - 1)} ${H - b} L${X(0)} ${H - b}Z" fill="#1f4a37" opacity=".1"/><path d="${path}" fill="none" stroke="#1f4a37" stroke-width="2"/>
+    <circle cx="${X(hist.length - 1)}" cy="${Y(last.index)}" r="4" fill="#d23b2a"/>
+    <text x="${l}" y="${H - 5}" font-size="10" fill="#5b6b62">${d0}</text><text x="${W - r}" y="${H - 5}" font-size="10" text-anchor="end" fill="#5b6b62">${d1}</text></svg>`;
+}
+
+function renderProfile() {
+  const el = $('profileView'); if (!el) return;
+  const show = location.hash === '#profile';
+  el.hidden = !show; if (!show) return;
+  const hc = handicap(), st = stats(), ix = indexInUse();
+  const name = (sync.user && (sync.user.user_metadata && (sync.user.user_metadata.full_name || sync.user.user_metadata.name))) || profile.display_name || 'Your profile';
+  const tees = ['Black', 'Blue', 'Blue/White', 'White'];
+  const chRows = tees.map(t => { const rs = ratingFor(t); const ch = courseHcp(t); return `<tr><td>${t}</td><td>${rs ? rs[0].toFixed(1) + ' / ' + rs[1] : '<span class="rm">not set</span>'}</td><td class="big">${ch == null ? '–' : ch < 0 ? '+' + (-ch) : ch}</td></tr>`; }).join('');
+  const recs = hc ? hc.records.slice().reverse() : [];
+  const row = r => {
+    const s = r.source, crown = !!s.roundId;
+    const d = new Date(r.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' });
+    const diff = r.diff == null ? '–' : (r.diff + (r.adj || 0)).toFixed(1);
+    const score = s.kind === 'diff' ? '–' : (r.gross ?? '–') + (r.ags != null && r.ags !== r.gross ? `<small> (${r.ags})</small>` : '');
+    const holes = s.kind === '9' ? ' · 9' : s.kind === 'partial' ? ` · ${r.nPlayed}` : '';
+    return `<tr class="${crown ? 'go' : 'ext'}" data-id="${esc(r.id)}"><td>${d}</td><td>${esc(s.course || '')}<small>${esc(s.tee ? ' · ' + s.tee : '')}${holes}</small></td><td>${score}</td><td>${s.rating != null ? (+(s.shownRating ?? s.rating)).toFixed(1) + '/' + s.slope : '–'}</td><td class="df ${r.inBest ? 'best' : ''}">${diff}${r.esr ? '*' : ''}</td></tr>${r.notes.length || r.status ? `<tr class="note"><td></td><td colspan="4">${esc([r.status].concat(r.notes).filter(Boolean).join(' · '))}</td></tr>` : ''}`;
+  };
+  el.innerHTML = `
+  <div class="pgrid">
+    <div class="box">
+      <h2>${esc(name)}</h2>
+      <div class="hix"><div><div class="k">Handicap Index</div><div class="v">${fmtIx(hc && hc.index)}</div>
+        <div class="rm">${hc && hc.index != null ? `From ${hc.counting} score${hc.counting === 1 ? '' : 's'}${hc.counting < 20 ? ' (uses the fewer-than-20 table)' : ', best 8 of the last 20'}` : `Post ${Math.max(0, 3 - (hc ? hc.counting : 0))} more 18-hole score${3 - (hc ? hc.counting : 0) === 1 ? '' : 's'} (or 9-hole pairs) to get an Index`}</div></div>
+        <div><div class="k">Low (12 mo)</div><div class="v sm">${fmtIx(hc && hc.low)}</div></div></div>
+      ${hc && hc.history.length > 1 ? trendSvg(hc.history.slice(-40)) : ''}
+      <div class="stp" style="grid-template-columns:1fr auto auto"><span>Official GHIN Index<br><small class="rm">Optional. Used for course handicaps when set.</small></span>
+        <input id="pfOff" inputmode="decimal" placeholder="e.g. 12.4" value="${profile.official_index ?? ''}" aria-label="Official Handicap Index" style="width:90px;font:600 18px var(--display);padding:8px;border:1px solid var(--rule);border-radius:8px;text-align:center">
+        <button class="rb" id="pfOffSave">Save</button></div>
+      <p class="rm">${ix ? `Course handicaps below use ${ix.src === 'official' ? 'your official Index' : 'the app\'s Index'} (${fmtIx(ix.v)}).` : 'Course handicaps appear once there is an Index.'}</p>
+      <table class="pt"><thead><tr><th>Tee</th><th>Rating / Slope</th><th>Course hcp</th></tr></thead><tbody>${chRows}</tbody></table>
+      <div class="rbtns"><button class="rb ghost" id="pfRatings">Edit ratings</button><button class="rb ghost" id="pfGender">${profile.gender === 'F' ? "Women's" : "Men's"} ratings</button></div>
+    </div>
+    <div class="box">
+      <h2>Stats · The Crown</h2>
+      <div class="sgrid">
+        <div><div class="k">Rounds</div><div class="v">${st.rounds}</div></div>
+        <div><div class="k">Avg score</div><div class="v">${st.avg == null ? '–' : st.avg.toFixed(1)}</div></div>
+        <div><div class="k">Best</div><div class="v">${st.best ?? '–'}</div></div>
+        <div><div class="k">Putts / round</div><div class="v">${st.putts == null ? '–' : st.putts.toFixed(1)}</div></div>
+        <div><div class="k">Fairways</div><div class="v">${st.fw == null ? '–' : st.fw + '%'}</div></div>
+        <div><div class="k">Greens (GIR)</div><div class="v">${st.gir == null ? '–' : st.gir + '%'}</div></div>
+        <div><div class="k">Par 3 avg</div><div class="v">${st.p3 == null ? '–' : (st.p3 >= 0 ? '+' : '') + st.p3.toFixed(2)}</div></div>
+        <div><div class="k">Par 4 avg</div><div class="v">${st.p4 == null ? '–' : (st.p4 >= 0 ? '+' : '') + st.p4.toFixed(2)}</div></div>
+        <div><div class="k">Par 5 avg</div><div class="v">${st.p5 == null ? '–' : (st.p5 >= 0 ? '+' : '') + st.p5.toFixed(2)}</div></div>
+      </div>
+      ${!sync.user && sync.enabled ? `<p class="rm" style="margin-top:12px">Scores are saved on this phone. <a href="#" id="pfIn">Sign in with Google</a> to keep them across devices.</p>` : ''}
+    </div>
+  </div>
+  <div class="box" style="margin-top:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">Score history</h2><button class="rb" id="pfAdd">Add a score</button></div>
+    <p class="rm">Highlighted differentials are the ones counting toward your Index. Numbers in brackets are adjusted for net double bogey. * marks an exceptional score.</p>
+    <div class="cardview"><table class="pt hist"><thead><tr><th>Date</th><th>Course</th><th>Score</th><th>Rating</th><th>Diff</th></tr></thead><tbody>${recs.length ? recs.map(row).join('') : '<tr><td colspan="5" class="rm">No scores yet. Finish a round at The Crown, or add scores from other courses or from GHIN.</td></tr>'}</tbody></table></div>
+  </div>
+  <p class="small">This is an unofficial index calculated with the World Handicap System rules (2024 revision). It doesn't apply Playing Conditions Calculation, and the expected score used for 9-hole and partial rounds is a close approximation of the USGA's formula. An official Handicap Index comes from your golf association through GHIN.</p>`;
+  $('pfOffSave').onclick = () => { const v = $('pfOff').value.trim().replace('+', '-'); profile.official_index = v === '' ? null : (isNaN(+v) ? profile.official_index : Math.max(-10, Math.min(54, +v))); saveProfileLocal(); render(); toast('Saved'); };
+  $('pfAdd').onclick = openAddScore;
+  $('pfRatings').onclick = openRatings;
+  $('pfGender').onclick = () => { profile.gender = profile.gender === 'F' ? 'M' : 'F'; saveProfileLocal(); render(); };
+  if ($('pfIn')) $('pfIn').onclick = e => { e.preventDefault(); sync.signIn(); };
+  el.querySelectorAll('tr.go').forEach(tr => tr.onclick = () => { viewRoundId = tr.dataset.id; location.hash = 'card'; });
+  el.querySelectorAll('tr.ext').forEach(tr => tr.onclick = () => {
+    const p = data.posted.find(x => x.id === tr.dataset.id); if (!p) return;
+    openSheet(`<h3>${esc(p.course || 'Score')}</h3><p class="rm">${esc(p.played_on.slice(0, 10))} · ${p.ags != null ? 'score ' + p.ags + ' · ' + p.course_rating + '/' + p.slope : 'differential ' + p.differential}</p><div class="rbtns"><button class="rb" id="pDel" style="background:var(--flag);color:#fff;border-color:var(--flag)">Delete this score</button><button class="rb ghost" id="pCancel">Cancel</button></div>`);
+    $('pDel').onclick = () => { deletePosted(p); closeSheet(); render(); }; $('pCancel').onclick = closeSheet;
+  });
+}
+function openAddScore() {
+  const today = new Date().toISOString().slice(0, 10);
+  openSheet(`<h3>Add a score</h3>
+    <div class="seg3" style="display:flex;gap:6px;margin-bottom:10px"><button class="rb" data-m="score" aria-pressed="true">Score at a course</button><button class="rb" data-m="diff" aria-pressed="false">Differential from GHIN</button></div>
+    <form id="asf" class="aform">
+      <label>Date<input type="date" id="asDate" value="${today}" required></label>
+      <label>Course<input id="asCourse" placeholder="e.g. Elmbrook" required></label>
+      <div class="mscore"><label>Tee<input id="asTee" placeholder="e.g. White"></label>
+        <label>Holes<select id="asHoles"><option value="18">18</option><option value="9">9</option></select></label>
+        <label>Adjusted score<input id="asAgs" inputmode="numeric" placeholder="e.g. 88"></label>
+        <label>Course rating<input id="asCr" inputmode="decimal" placeholder="e.g. 70.4"></label>
+        <label>Slope<input id="asSl" inputmode="numeric" placeholder="e.g. 128"></label>
+        <label>Par<input id="asPar" inputmode="numeric" value="72"></label>
+        <p class="rm">Cap each hole at net double bogey (par + 2 + your strokes on that hole) before adding up. For 9 holes, use the 9-hole rating and slope from the scorecard.</p></div>
+      <div class="mdiff" hidden><label>Score Differential<input id="asDiff" inputmode="decimal" placeholder="e.g. 14.2"></label>
+        <p class="rm">In the GHIN app, your score history shows the differential for each round. Entering your last 20 here gives the app the same record GHIN uses.</p></div>
+      <p class="rm" id="asErr" style="color:var(--flag)"></p>
+      <div class="rbtns"><button class="rb main" type="submit">Add score</button></div>
+    </form>`);
+  let mode = 'score';
+  document.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { mode = b.dataset.m; document.querySelectorAll('[data-m]').forEach(x => x.setAttribute('aria-pressed', x.dataset.m === mode)); document.querySelector('.mscore').hidden = mode !== 'score'; document.querySelector('.mdiff').hidden = mode !== 'diff'; });
+  $('asf').onsubmit = e => {
+    e.preventDefault();
+    const err = m => { $('asErr').textContent = m; };
+    const date = $('asDate').value, course = $('asCourse').value.trim();
+    if (!date || !course) return err('Add a date and course.');
+    const p = { id: uuid(), played_on: new Date(date + 'T12:00:00').toISOString(), course, tee: null, holes: 18, gross: null, ags: null, course_rating: null, slope: null, par: null, differential: null };
+    if (mode === 'diff') {
+      const d = parseFloat($('asDiff').value.replace('+', '-')); if (isNaN(d) || d < -10 || d > 80) return err('Enter the differential, like 14.2.');
+      p.differential = d;
+    } else {
+      const ags = parseInt($('asAgs').value, 10), cr = parseFloat($('asCr').value), sl = parseInt($('asSl').value, 10), par = parseInt($('asPar').value, 10) || 72, holes = +$('asHoles').value;
+      if (!ags || !cr || !sl) return err('Add the score, course rating and slope.');
+      if (sl < 55 || sl > 155) return err('Slope is usually between 55 and 155.');
+      Object.assign(p, { tee: $('asTee').value.trim() || null, holes, ags, gross: ags, course_rating: cr, slope: sl, par });
+    }
+    upsertPosted(p); closeSheet(); render(); toast('Score added');
+  };
+}
+function openRatings() {
+  const g = profile.gender || 'M', tees = ['Black', 'Blue', 'Blue/White', 'White'];
+  openSheet(`<h3>The Crown · ${g === 'F' ? "women's" : "men's"} ratings</h3><p class="rm">Match these to the course card or your GHIN app.</p>
+    <form id="rtf" class="aform">${tees.map((t, i) => { const rs = ratingFor(t, g) || ['', '']; return `<div class="mscore"><label>${t} rating<input id="rc${i}" inputmode="decimal" value="${rs[0]}"></label><label>${t} slope<input id="rs${i}" inputmode="numeric" value="${rs[1]}"></label></div>`; }).join('')}
+    <div class="rbtns"><button class="rb main" type="submit">Save</button><button class="rb ghost" type="button" id="rtReset">Reset to defaults</button></div></form>`);
+  $('rtf').onsubmit = e => {
+    e.preventDefault();
+    profile.tee_ratings = profile.tee_ratings || {}; profile.tee_ratings[g] = {};
+    tees.forEach((t, i) => { const c = parseFloat($('rc' + i).value), s = parseInt($('rs' + i).value, 10); if (c && s) profile.tee_ratings[g][t] = [c, s]; });
+    saveProfileLocal(); closeSheet(); render();
+  };
+  $('rtReset').onclick = () => { if (profile.tee_ratings) delete profile.tee_ratings[g]; saveProfileLocal(); closeSheet(); render(); };
+}
+
 /* ------------------------------------------------------------------ wiring */
-function render() { renderAcct(); renderBar(); renderMyCard(); }
+function render() { hcCache = null; renderAcct(); renderBar(); renderMyCard(); renderProfile(); }
 function boot() {
   if (!window.YB) return setTimeout(boot, 50);
   G = geoFns();

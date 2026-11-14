@@ -194,6 +194,7 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 </div>
 
 <script src="config.js"></script>
+<script src="handicap.js" defer></script>
 <script src="round.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
@@ -619,8 +620,9 @@ new ResizeObserver(()=>{if(view==='2d')draw2d()}).observe($('stage'));
 /* ---------- routing ---------- */
 function route(){
   const m=location.hash.match(/^#hole-(\d+)$/);
-  const isCard=location.hash==='#card';
-  $('holeView').hidden=isCard; $('cardView').hidden=!isCard;
+  const isCard=location.hash==='#card', isProf=location.hash==='#profile';
+  $('holeView').hidden=isCard||isProf; $('cardView').hidden=!isCard;
+  if(isProf){ $('holes').querySelectorAll('button').forEach(b=>b.setAttribute('aria-current','false')); return; }
   $('holes').querySelectorAll('button').forEach(b=>b.setAttribute('aria-current', isCard? String(b.dataset.h==='card') : String(+b.dataset.h===(m?+m[1]:cur))));
   if(isCard){renderCard();return}
   const n=m?Math.min(18,Math.max(1,+m[1])):cur;
