@@ -1002,7 +1002,7 @@ window.addEventListener('online', () => sync.flush());
 /* ------------------------------------------------------------------ handicap + profile */
 const LS_PROFILE = 'yb-profile-v1';
 // Course Rating / Slope by tee. Men's values from GolfPass; White and women's values from
-// other listings: confirm against your GHIN app and edit on the profile page.
+// other listings.
 const DEFAULT_RATINGS = {
   M: { 'Black': [72.1, 137], 'Blue': [70.0, 128], 'Blue/White': [68.3, 126], 'White': [66.1, 116] },
   F: { 'Black': null, 'Blue': [76.2, 134], 'Blue/White': null, 'White': [71.4, 126] }
@@ -1043,9 +1043,8 @@ function handicap() {
   hcCache = WHS.compute(allScores(), { startIndex: profile.official_index != null ? +profile.official_index : null });
   return hcCache;
 }
-// The index used for course handicaps: an official GHIN index if entered, otherwise the app's own
+// The index used for course handicaps: the app's own World Handicap System calculation
 function indexInUse() {
-  if (profile.official_index != null && profile.official_index !== '') return { v: +profile.official_index, src: 'official' };
   const h = hcCache || handicap();
   return h && h.index != null ? { v: h.index, src: 'app' } : null;
 }
@@ -1100,7 +1099,6 @@ function renderProfile() {
   const hc = handicap(), st = stats(), ix = indexInUse();
   const name = (sync.user && (sync.user.user_metadata && (sync.user.user_metadata.full_name || sync.user.user_metadata.name))) || profile.display_name || 'Your profile';
   const tees = ['Black', 'Blue', 'Blue/White', 'White'];
-  const chRows = tees.map(t => { const rs = ratingFor(t); const ch = courseHcp(t); return `<tr><td>${t}</td><td>${rs ? rs[0].toFixed(1) + ' / ' + rs[1] : '<span class="rm">not set</span>'}</td><td class="big">${ch == null ? '–' : ch < 0 ? '+' + (-ch) : ch}</td></tr>`; }).join('');
   const allRecs = hc ? hc.records.slice().reverse() : [];
   const recs = profileShowAll ? allRecs : allRecs.slice(0, 40);
   const row = r => {
@@ -1121,15 +1119,9 @@ function renderProfile() {
         <div class="rm">${hc && hc.index != null ? `From ${hc.counting} score${hc.counting === 1 ? '' : 's'}${hc.counting < 20 ? ' (uses the fewer-than-20 table)' : ', best 8 of the last 20'}` : `Post ${Math.max(0, 3 - (hc ? hc.counting : 0))} more 18-hole score${3 - (hc ? hc.counting : 0) === 1 ? '' : 's'} (or 9-hole pairs) to get an Index`}</div></div>
         <div><div class="k">Low (12 mo)</div><div class="v sm">${fmtIx(hc && hc.low)}</div></div></div>
       ${hc && hc.history.length > 1 ? trendSvg(hc.history.slice(-40)) : ''}
-      <div class="stp" style="grid-template-columns:1fr auto auto"><span>Official GHIN Index<br><small class="rm">Optional. Used for course handicaps when set.</small></span>
-        <input id="pfOff" inputmode="decimal" placeholder="e.g. 12.4" value="${profile.official_index ?? ''}" aria-label="Official Handicap Index" style="width:90px;font:600 18px var(--display);padding:8px;border:1px solid var(--rule);border-radius:8px;text-align:center">
-        <button class="rb" id="pfOffSave">Save</button></div>
-      <p class="rm">${ix ? `Course handicaps below use ${ix.src === 'official' ? 'your official Index' : 'the app\'s Index'} (${fmtIx(ix.v)}).` : 'Course handicaps appear once there is an Index.'}</p>
-      <table class="pt"><thead><tr><th>Tee</th><th>Rating / Slope</th><th>Course hcp</th></tr></thead><tbody>${chRows}</tbody></table>
-      <div class="rbtns"><button class="rb ghost" id="pfRatings">Edit ratings</button><button class="rb ghost" id="pfGender">${profile.gender === 'F' ? "Women's" : "Men's"} ratings</button></div>
     </div>
     <div class="box">
-      <h2>Stats · The Crown</h2>
+      <h2>Stats · rounds played in the app</h2>
       <div class="sgrid">
         <div><div class="k">Rounds</div><div class="v">${st.rounds}</div></div>
         <div><div class="k">Avg score</div><div class="v">${st.avg == null ? '–' : st.avg.toFixed(1)}</div></div>
@@ -1148,10 +1140,9 @@ function renderProfile() {
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">Score history</h2><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="rb" id="pfImport">Import scores</button><button class="rb ghost" id="pfAdd">Add one</button></div></div>
     ${store.get(LS_LASTIMPORT, []).length ? `<p class="rm">Last import: ${store.get(LS_LASTIMPORT, []).length} scores · <a href="#" id="pfUndoImp">undo it</a></p>` : ''}
     <p class="rm">Highlighted differentials are the ones counting toward your Index. Numbers in brackets are adjusted for net double bogey. * marks an exceptional score.</p>
-    <div class="cardview"><table class="pt hist"><thead><tr><th>Date</th><th>Course</th><th>Score</th><th>Rating</th><th>Diff</th></tr></thead><tbody>${recs.length ? recs.map(row).join('') + (allRecs.length > recs.length ? `<tr><td colspan="5"><button class="rb ghost" id="pfAll" style="width:100%">Show all ${allRecs.length} scores</button></td></tr>` : '') : '<tr><td colspan="5" class="rm">No scores yet. Finish a round at The Crown, or import your history from another app or GHIN.</td></tr>'}</tbody></table></div>
+    <div class="cardview"><table class="pt hist"><thead><tr><th>Date</th><th>Course</th><th>Score</th><th>Rating</th><th>Diff</th></tr></thead><tbody>${recs.length ? recs.map(row).join('') + (allRecs.length > recs.length ? `<tr><td colspan="5"><button class="rb ghost" id="pfAll" style="width:100%">Show all ${allRecs.length} scores</button></td></tr>` : '') : '<tr><td colspan="5" class="rm">No scores yet. Finish a round in the app, or import your history from another app.</td></tr>'}</tbody></table></div>
   </div>
-  <p class="small">This is an unofficial index calculated with the World Handicap System rules (2024 revision). It doesn't apply Playing Conditions Calculation, and the expected score used for 9-hole and partial rounds is a close approximation of the USGA's formula. An official Handicap Index comes from your golf association through GHIN.</p>`;
-  $('pfOffSave').onclick = () => { const v = $('pfOff').value.trim().replace('+', '-'); profile.official_index = v === '' ? null : (isNaN(+v) ? profile.official_index : Math.max(-10, Math.min(54, +v))); saveProfileLocal(); render(); toast('Saved'); };
+  <p class="small">This is an unofficial index calculated with the World Handicap System rules (2024 revision). It doesn't apply Playing Conditions Calculation, and the expected score used for 9-hole and partial rounds is a close approximation of the USGA's formula. It isn't an official Handicap Index.</p>`;
   // traced shot rounds (from screenshots)
   const traced = data.rounds.filter(x => x.course === COURSE_ID && isImported(x)).sort((a, b) => b.started_at.localeCompare(a.started_at));
   const ownShots = data.rounds.filter(x => x.course === COURSE_ID && !isImported(x)).reduce((t, x) => t + new Set(roundShots(x.id).map(s => s.hole)).size, 0);
@@ -1168,9 +1159,7 @@ function renderProfile() {
   if ($('pfIn')) $('pfIn').onclick = () => sync.signIn();
   $('pfImport').onclick = openImport;
   if ($('pfUndoImp')) $('pfUndoImp').onclick = e => { e.preventDefault(); openSheet(`<h3>Undo last import?</h3><p class="rm">Removes the ${store.get(LS_LASTIMPORT, []).length} scores from your last import${sync.user ? ', including from your account' : ''}.</p><div class="rbtns"><button class="rb" id="uiYes" style="background:var(--flag);color:#fff;border-color:var(--flag)">Remove them</button><button class="rb ghost" id="uiNo">Cancel</button></div>`); $('uiYes').onclick = () => { closeSheet(); undoLastImport(); }; $('uiNo').onclick = closeSheet; };
-  $('pfRatings').onclick = openRatings;
   if ($('pfAll')) $('pfAll').onclick = () => { profileShowAll = true; renderProfile(); };
-  $('pfGender').onclick = () => { profile.gender = profile.gender === 'F' ? 'M' : 'F'; saveProfileLocal(); render(); };
   if ($('pfIn')) $('pfIn').onclick = e => { e.preventDefault(); sync.signIn(); };
   el.querySelectorAll('tr.go').forEach(tr => tr.onclick = () => { viewRoundId = tr.dataset.id; location.hash = 'card'; });
   el.querySelectorAll('tr.ext').forEach(tr => tr.onclick = () => {
@@ -1182,7 +1171,6 @@ function renderProfile() {
 function openAddScore() {
   const today = new Date().toISOString().slice(0, 10);
   openSheet(`<h3>Add a score</h3>
-    <div class="seg3" style="display:flex;gap:6px;margin-bottom:10px"><button class="rb" data-m="score" aria-pressed="true">Score at a course</button><button class="rb" data-m="diff" aria-pressed="false">Differential from GHIN</button></div>
     <form id="asf" class="aform">
       <label>Date<input type="date" id="asDate" value="${today}" required></label>
       <label>Course<div id="asCoursePick"></div></label>
@@ -1196,11 +1184,10 @@ function openAddScore() {
           <label>Rating<input id="asCr" inputmode="decimal" placeholder="70.4"></label>
           <label>Slope<input id="asSl" inputmode="numeric" placeholder="128"></label>
           <label>Par<input id="asPar" inputmode="numeric" value="72"></label></div>
-          <p class="rm">From the scorecard or GHIN's course lookup. Enter the 18-hole numbers; it's saved to the course list so nobody has to type it again.</p>
+          <p class="rm">From the course's scorecard or website. Enter the 18-hole numbers; it's saved to the course list so nobody has to type it again.</p>
         </div>
       </div>
-      <div class="mdiff" hidden><label>Score Differential<input id="asDiff" inputmode="decimal" placeholder="e.g. 14.2"></label>
-        <p class="rm">In the GHIN app, your score history shows the differential for each round.</p></div>
+
       <p class="rm" id="asErr" style="color:var(--flag)"></p>
       <div class="rbtns"><button class="rb main" type="submit">Add score</button></div>
     </form>`);
@@ -1256,7 +1243,7 @@ function openAddScore() {
 }
 function openRatings() {
   const g = profile.gender || 'M', tees = ['Black', 'Blue', 'Blue/White', 'White'];
-  openSheet(`<h3>The Crown · ${g === 'F' ? "women's" : "men's"} ratings</h3><p class="rm">Match these to the course card or your GHIN app.</p>
+  openSheet(`<h3>The Crown · ${g === 'F' ? "women's" : "men's"} ratings</h3><p class="rm">Match these to the course scorecard.</p>
     <form id="rtf" class="aform">${tees.map((t, i) => { const rs = ratingFor(t, g) || ['', '']; return `<div class="mscore"><label>${t} rating<input id="rc${i}" inputmode="decimal" value="${rs[0]}"></label><label>${t} slope<input id="rs${i}" inputmode="numeric" value="${rs[1]}"></label></div>`; }).join('')}
     <div class="rbtns"><button class="rb main" type="submit">Save</button><button class="rb ghost" type="button" id="rtReset">Reset to defaults</button></div></form>`);
   $('rtf').onsubmit = e => {
@@ -1384,19 +1371,19 @@ let imp = null;   // import session state
 function openImport() {
   imp = { rows: null, header: null, map: null, items: null, src: null };
   openSheet(`<h3>Import scores</h3>
-    <p class="rm">Bring in your history from another app or a spreadsheet. Each row needs a date and a score (or a Score Differential from GHIN). You'll add each course's rating and slope once.</p>
+    <p class="rm">Bring in your history from another app or a spreadsheet. Each row needs a date and a score. You'll add each course's rating and slope once.</p>
     <div class="impsrc">
       <label class="rb impfile">Upload a CSV file<input type="file" id="impFile" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden></label>
       <button class="rb" id="impPasteBtn">Paste rows</button>
       <button class="rb" id="impTypeBtn">Type them in</button>
     </div>
-    <p class="rm"><b>18Birdies</b> doesn't export scores, so open Rounds Played and type them in here (or copy them into a spreadsheet first and paste). <b>GHIN</b> users can paste their score history with the differential column.</p>`);
+    <p class="rm"><b>18Birdies</b> doesn't export scores, so open Rounds Played and type them in here (or copy them into a spreadsheet first and paste).</p>`);
   $('impFile').onchange = e => { const f = e.target.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => fromText(String(rd.result), 'file'); rd.readAsText(f); };
   $('impPasteBtn').onclick = openPaste;
   $('impTypeBtn').onclick = () => openGrid([]);
 }
 function openPaste() {
-  openSheet(`<h3>Paste rows</h3><p class="rm">Copy rows from a spreadsheet, notes or a GHIN score list. One round per line, e.g.<br><code>6/14/2025, Elmbrook, White, 88</code></p>
+  openSheet(`<h3>Paste rows</h3><p class="rm">Copy rows from a spreadsheet or your notes. One round per line, e.g.<br><code>6/14/2025, Elmbrook, White, 88</code></p>
     <textarea id="impText" rows="10" style="width:100%;font:14px/1.4 ui-monospace,monospace;padding:10px;border:1px solid var(--rule);border-radius:8px" placeholder="Date, Course, Tee, Score"></textarea>
     <div class="rbtns"><button class="rb ghost" id="impBack">Back</button><button class="rb main" id="impGo">Continue</button></div>`);
   $('impBack').onclick = openImport;
@@ -1495,7 +1482,7 @@ async function ratingsStep() {
   });
   const nAuto = gs.filter(([, g]) => g.auto).length;
   openSheet(`<h3>Course ratings</h3>
-    <p class="rm">${nAuto === gs.length ? 'Found every course. Check the numbers look right, then import.' : nAuto ? `Found ${nAuto} of ${gs.length}. Add rating and slope for the rest once and they're saved to the course list for next time.` : `Add each course's rating and slope once (scorecard or GHIN course lookup). They're saved to the course list for next time.`}${gs.some(([, g]) => g.holes === 9) ? ' 9-hole rows left blank use half the 18-hole rating.' : ''}</p>
+    <p class="rm">${nAuto === gs.length ? 'Found every course. Check the numbers look right, then import.' : nAuto ? `Found ${nAuto} of ${gs.length}. Add rating and slope for the rest once and they're saved to the course list for next time.` : `Add each course's rating and slope once (from the course's scorecard or website). They're saved to the course list for next time.`}${gs.some(([, g]) => g.holes === 9) ? ' 9-hole rows left blank use half the 18-hole rating.' : ''}</p>
     <form id="rtgForm" class="aform">${gs.map(([k, g], i) => {
       const a = g.auto, src = a ? (g.saved ? 'saved earlier' : g.match.source === 'golfcourseapi' ? 'course database' : g.match.source === 'seed' ? 'built in' : 'course list') : '';
       return `<div class="crow ${a ? 'auto' : ''}"><div class="cname"><b>${esc(g.course || 'Unnamed course')}</b>${g.tee ? ' · ' + esc(g.tee) : ''}${g.holes === 9 ? ' · 9 holes' : ''}<br><small class="rm">${g.n} round${g.n === 1 ? '' : 's'}${a ? ` · ✓ ${esc(g.match && !g.saved ? g.match.name + ' ' : '')}${esc(a.name || '')} (${src}${a.derived ? ', half of 18' : ''})` : g.match && !g.tee18 ? ` · ${esc(g.match.name)} found, but no “${esc(g.tee || '')}” tee` : ''}</small></div>
