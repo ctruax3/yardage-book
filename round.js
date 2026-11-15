@@ -299,6 +299,7 @@ function ensureChrome() {
   .trwrap{display:flex;justify-content:center;margin:8px 0;background:#0f1a15;border-radius:10px;overflow:hidden}
   .trwrap canvas{touch-action:none;cursor:crosshair;display:block}
   .hbtn{min-width:34px;height:34px;margin:2px;border:1px solid var(--rule);border-radius:8px;background:var(--card);font:700 15px var(--display);cursor:pointer}
+  .trstep{font-size:16px;margin:4px 0 8px;min-height:44px}
   .trov{display:flex;gap:8px;align-items:center;font-size:14px;color:var(--muted);margin:2px 0 6px}
   .trlist{display:grid;gap:6px;margin:8px 0}.trrow{display:grid;grid-template-columns:1fr auto 1.3fr;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--rule)}
   .trrow select{font:15px var(--body);padding:8px;border:1px solid var(--rule);border-radius:8px;min-height:40px;background:#fff}
@@ -633,7 +634,7 @@ function traceHowto(open) {
       <li>Take a screenshot (side button + volume up). One screenshot per hole.</li>
       <li>Here, pick the date, the tees you played and the hole, then choose the screenshot.</li>
     </ol></div>
-    <p class="rm" style="margin:6px 0 0">The app finds the blue pins for you. You tap the tee icon and the middle of the green so it can line the picture up with the course.</p></details>`;
+    <p class="rm" style="margin:6px 0 0">Then here: tap the tee icon, tap each blue pin in order, tap <b>Green</b> and tap the middle of the green. Add the first putt length if you have it.</p></details>`;
 }
 function openTrace(hole) {
   const today = new Date().toISOString().slice(0, 10);
@@ -691,103 +692,74 @@ function orderPts(pts) {
   return pts.slice().sort((p, q) => ((p[0] - a[0]) * v[0] + (p[1] - a[1]) * v[1]) - ((q[0] - a[0]) * v[0] + (q[1] - a[1]) * v[1]));
 }
 function traceScreen() {
+  // one simple sequence: tee icon, each shot, then the green; putt length is typed in
+  tr.taps = tr.taps || []; tr.green = tr.green || null; tr.mode = tr.green ? 'done' : (tr.mode || 'shots');
   openSheet(`<h3>Hole ${tr.hole}</h3>
-    <p class="rm" id="trHint"></p>
+    <p class="trstep" id="trHint"></p>
     <div class="trwrap"><canvas id="trCan"></canvas></div>
-    <label class="trov"><input type="checkbox" id="trOv" checked> Show course outlines</label>
-    <div class="rbtns"><button class="rb ghost" id="trUndo">Undo</button><button class="rb main" id="trDone" disabled>Next</button></div>`);
+    <div id="trPutt" class="aform" hidden><label>First putt, feet from the hole (optional)<input id="trFt" inputmode="numeric" placeholder="e.g. 18" value="${tr.puttFt ?? ''}"></label></div>
+    <div class="rbtns"><button class="rb ghost" id="trUndo">Undo</button><button class="rb" id="trGreen">Green</button><button class="rb main" id="trDone">Next</button></div>`);
   const can = $('trCan'), img = tr.img;
-  const maxW = Math.min(can.parentElement.clientWidth || 360, 600), maxH = Math.max(320, innerHeight * 0.6);
+  const maxW = Math.min(can.parentElement.clientWidth || 360, 600), maxH = Math.max(320, innerHeight * 0.58);
   const k = Math.min(maxW / img.width, maxH / img.height), dpr = devicePixelRatio || 1;
   can.style.width = img.width * k + 'px'; can.style.height = img.height * k + 'px';
   can.width = Math.round(img.width * k * dpr); can.height = Math.round(img.height * k * dpr);
-  const ctx = can.getContext('2d'), hist = [];
-  const h = YB.H[tr.hole - 1], g = YB.geom(h, 'Black'), F = YB.course.features || {};
-  // course features near this hole, for the alignment check
-  const near = (poly) => poly.some(p => Math.min(Math.hypot(p[0] - g.tee[0], p[1] - g.tee[1]), Math.hypot(p[0] - g.gc[0], p[1] - g.gc[1]), Math.hypot(p[0] - (g.tee[0] + g.gc[0]) / 2, p[1] - (g.tee[1] + g.gc[1]) / 2)) < 420);
-  const feats = ['fairways', 'bunkers', 'greens', 'water'].flatMap(kind => (F[kind] || []).filter(near).map(poly => ({ kind, poly })));
-  const mark = (p, lab, fill, fg, rad = 9) => { ctx.fillStyle = fill; ctx.strokeStyle = '#14241d'; ctx.lineWidth = 2.5 * dpr; ctx.beginPath(); ctx.arc(p[0], p[1], rad * dpr, 0, 7); ctx.fill(); ctx.stroke(); ctx.fillStyle = fg; ctx.font = `700 ${11 * dpr}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(lab, p[0], p[1] + .5); };
+  const ctx = can.getContext('2d');
+  const mark = (p, lab, fill, fg) => { ctx.fillStyle = fill; ctx.strokeStyle = '#14241d'; ctx.lineWidth = 2.5 * dpr; ctx.beginPath(); ctx.arc(p[0], p[1], 10 * dpr, 0, 7); ctx.fill(); ctx.stroke(); ctx.fillStyle = fg; ctx.font = `700 ${11 * dpr}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(lab, p[0], p[1] + .5); };
   const draw = () => {
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(img, 0, 0, can.width, can.height);
     const sc = can.width / img.width, P = t => [t[0] * sc, t[1] * sc];
-    if (tr.anchors.length === 2 && $('trOv').checked) {
-      const inv = fit2inv(tr.anchors[0], tr.anchors[1], g.tee, g.gc);
-      if (inv) {
-        ctx.save(); ctx.lineJoin = 'round';
-        feats.forEach(({ kind, poly }) => {
-          ctx.beginPath(); poly.forEach((w, i) => { const p = P(inv(w)); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }); ctx.closePath();
-          ctx.lineWidth = (kind === 'fairways' ? 1.5 : 2) * dpr;
-          ctx.strokeStyle = kind === 'greens' ? '#ff5bd1' : kind === 'bunkers' ? '#ffffff' : kind === 'water' ? '#5bc8ff' : 'rgba(255,255,255,.55)';
-          ctx.setLineDash(kind === 'fairways' ? [5 * dpr, 4 * dpr] : []); ctx.stroke();
-        });
-        ctx.setLineDash([4 * dpr, 4 * dpr]); ctx.strokeStyle = 'rgba(255,91,209,.9)'; ctx.lineWidth = 1.5 * dpr;
-        ctx.beginPath(); h.line.forEach((w, i) => { const p = P(inv(w)); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }); ctx.stroke();
-        ctx.restore();
-      }
-    }
-    if (tr.pts.length > 1) { ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2.5 * dpr; ctx.setLineDash([]); ctx.beginPath(); tr.pts.forEach((t, i) => { const p = P(t); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }); ctx.stroke(); }
-    tr.pts.forEach((t, i) => mark(P(t), String(i + 1), '#ffd23f', '#14241d'));
-    if (tr.anchors[0]) mark(P(tr.anchors[0]), 'T', '#fff', '#14241d', 11);
-    if (tr.anchors[1]) mark(P(tr.anchors[1]), 'G', '#ff5bd1', '#fff', 11);
-    const a = tr.anchors.length, n = tr.pts.length;
-    $('trHint').innerHTML = a === 0 ? '<b>1.</b> Tap the small white <b>tee icon</b> (it marks the back tee, behind your first pin).'
-      : a === 1 ? '<b>2.</b> Tap the <b>middle of the green</b> (18Birdies shows a small grey dot there).'
-      : `<b>3.</b> The <b style="color:#c2189b">pink and white outlines</b> are this app's greens and bunkers. If they don't sit on the ones in your screenshot, <b>drag T and G</b> until they do. `
-        + (tr.auto ? `Found <b>${tr.auto} shot${tr.auto === 1 ? '' : 's'}</b>. ` : 'Tap the point of each blue pin. ') + 'Drag a number to move it, tap it to remove it, tap the picture to add one.';
-    $('trDone').disabled = a < 2 || n < 2; $('trUndo').disabled = !hist.length;
+    const path = tr.taps.slice(1).concat(tr.green ? [tr.green] : []);
+    if (path.length > 1) { ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2.5 * dpr; ctx.beginPath(); path.forEach((t, i) => { const p = P(t); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }); ctx.stroke(); }
+    tr.taps.forEach((t, i) => i === 0 ? mark(P(t), 'T', '#fff', '#14241d') : mark(P(t), String(i), '#ffd23f', '#14241d'));
+    if (tr.green) mark(P(tr.green), 'G', '#d23b2a', '#fff');
+    const n = tr.taps.length;
+    $('trHint').innerHTML = tr.mode === 'green' ? '<b>Tap the middle of the green</b> (the grey dot on the green).'
+      : tr.mode === 'done' ? 'Done. Add the first putt length if 18Birdies shows it, then tap <b>Next</b>.'
+      : n === 0 ? '<b>Tap the small white tee icon</b> at the back of the tee box.'
+      : n === 1 ? '<b>Tap shot 1</b>: the point of the first blue pin.'
+      : `<b>Tap shot ${n}</b>, or tap <b>Green</b> when you've done the last pin.`;
+    $('trGreen').disabled = n < 2 || tr.mode !== 'shots';
+    $('trGreen').setAttribute('aria-pressed', String(tr.mode === 'green'));
+    $('trDone').disabled = tr.mode !== 'done';
+    $('trUndo').disabled = !n;
+    $('trPutt').hidden = tr.mode !== 'done';
   };
-  const toImg = ev => { const r = can.getBoundingClientRect(); return [(ev.clientX - r.left) / r.width * img.width, (ev.clientY - r.top) / r.height * img.height]; };
-  const grabR = () => 22 / (can.getBoundingClientRect().width / img.width);   // finger-sized, in image pixels
-  let drag = null;
-  const snap = () => hist.push({ anchors: tr.anchors.map(q => q.slice()), pts: tr.pts.map(q => q.slice()), auto: tr.auto });
-  can.onpointerdown = ev => {
-    const p = toImg(ev), R = grabR(); can.setPointerCapture(ev.pointerId);
-    let target = null;
-    if (tr.anchors.length === 2) {
-      const ai = tr.anchors.findIndex(q => Math.hypot(q[0] - p[0], q[1] - p[1]) < R);
-      if (ai >= 0) target = { kind: 'a', i: ai };
-      else { const pi = tr.pts.findIndex(q => Math.hypot(q[0] - p[0], q[1] - p[1]) < R); if (pi >= 0) target = { kind: 'p', i: pi }; }
-    }
-    drag = { start: p, x: ev.clientX, y: ev.clientY, target, moved: false };
+  // a tap near a blue pin lands on the pin's point
+  const snap = p => { const W = img.width, R = Math.max(0.07 * W, 30 / (can.getBoundingClientRect().width / W)); let best = null, bd = R; (tr.found || []).forEach(q => { const d = Math.min(Math.hypot(q[0] - p[0], q[1] - p[1]), Math.hypot(q[0] - p[0], q[1] - 0.05 * W - p[1])); if (d < bd) { bd = d; best = q; } }); return best ? best.slice() : p; };
+  can.onclick = ev => {
+    const r = can.getBoundingClientRect(), p = [(ev.clientX - r.left) / r.width * img.width, (ev.clientY - r.top) / r.height * img.height];
+    if (tr.mode === 'green') { tr.green = p; tr.mode = 'done'; }
+    else if (tr.mode === 'shots') tr.taps.push(tr.taps.length === 0 ? p : snap(p));
+    draw();
+    if (tr.mode === 'done') setTimeout(() => $('trFt') && $('trFt').focus(), 50);
   };
-  can.onpointermove = ev => {
-    if (!drag || !drag.target) return;
-    if (!drag.moved) { if (Math.hypot(ev.clientX - drag.x, ev.clientY - drag.y) < 6) return; snap(); drag.moved = true; }
-    ev.preventDefault();
-    const p = toImg(ev);
-    if (drag.target.kind === 'a') tr.anchors[drag.target.i] = p; else tr.pts[drag.target.i] = p;
+  $('trGreen').onclick = () => { tr.mode = 'green'; draw(); };
+  $('trUndo').onclick = () => {
+    if (tr.mode === 'done') { tr.green = null; tr.mode = 'green'; }
+    else if (tr.mode === 'green') tr.mode = 'shots';
+    else tr.taps.pop();
     draw();
   };
-  can.onpointerup = () => {
-    const d = drag; drag = null; if (!d) return;
-    if (d.moved) { if (d.target.kind === 'p') tr.pts = orderPts(tr.pts); draw(); return; }
-    const p = d.start; snap();
-    if (tr.anchors.length < 2) {
-      tr.anchors.push(p);
-      if (tr.anchors.length === 2 && !tr.pts.length && tr.found.length) { tr.pts = orderPts(tr.found); tr.auto = tr.pts.length; }
-    } else if (d.target && d.target.kind === 'p') tr.pts.splice(d.target.i, 1);
-    else if (!d.target) tr.pts = orderPts(tr.pts.concat([p]));
-    else hist.pop();   // tapped T or G without moving: nothing changes
-    draw();
-  };
-  can.onpointercancel = () => { drag = null; };
-  $('trOv').onchange = draw;
-  $('trUndo').onclick = () => { const s = hist.pop(); if (!s) return; tr.anchors = s.anchors; tr.pts = s.pts; tr.auto = s.auto; draw(); };
-  $('trDone').onclick = traceReview;
+  $('trDone').onclick = () => { const v = parseFloat($('trFt').value); tr.puttFt = isNaN(v) ? null : v; traceReview(); };
   draw();
 }
 function traceShots() {
-  // 18Birdies' tee icon is always the back (Black) tee, whatever tees are shown at the top
+  // 18Birdies' tee icon is always the back (Black) tee
   const h = YB.H[tr.hole - 1], g = YB.geom(h, 'Black');
-  const f = fit2(tr.anchors[0], tr.anchors[1], g.tee, g.gc); if (!f) return null;
-  return { g, pts: tr.pts.map(f) };   // shot i is hit from pts[i]
+  const f = fit2(tr.taps[0], tr.green, g.tee, g.gc); if (!f) return null;
+  const pts = tr.taps.slice(1).map(f);
+  // where the ball finished: putt length back from the hole along the line of the last shot, or the middle of the green
+  const last = pts[pts.length - 1], d = [g.gc[0] - last[0], g.gc[1] - last[1]], L = Math.hypot(d[0], d[1]) || 1;
+  const back = tr.puttFt ? Math.min(tr.puttFt / 3.28084, L) : 0;
+  pts.push([g.gc[0] - d[0] / L * back, g.gc[1] - d[1] / L * back]);
+  return { g, pts, imgToW: f };
 }
 function traceReview() {
   const res = traceShots(); if (!res) { toast('Tap the tee and green in different spots'); return; }
-  const g = res.g, imgToW = fit2(tr.anchors[0], tr.anchors[1], g.tee, g.gc);
   shotEditor({
-    hole: tr.hole, pts: res.pts, clubs: tr.clubs, img: tr.img, imgToW,
-    title: `Hole ${tr.hole} · check on the course map`,
+    hole: tr.hole, pts: res.pts, clubs: tr.clubs, img: tr.img, imgToW: res.imgToW,
+    title: `Hole ${tr.hole} · check it`,
     back: traceScreen,
     save: (pts, clubs, onGreen) => { tr.clubs = clubs; saveTrace(pts, onGreen); }
   });
@@ -799,9 +771,9 @@ function shotEditor(o) {
   let pts = o.pts.map(p => p.slice()); const clubs = (o.clubs || []).slice(); const hist = [];
   const clubList = bag && bag.length ? bag : ['Driver', '3W', '5W', 'Hybrid', '4i', '5i', '6i', '7i', '8i', '9i', 'PW', 'GW', 'SW', 'LW', 'Putter'];
   openSheet(`<h3>${esc(o.title)}</h3>
-    <p class="rm">This is the app's own map of hole ${o.hole}. ${o.img ? 'Your screenshot is laid over it; slide to fade it in and out and check the bunkers and green match. ' : ''}Drag a shot to move it, tap it to remove it, tap the map to add one.</p>
+    <p class="rm">Your shots on this app's map of hole ${o.hole}. Drag a shot if it's in the wrong place.</p>
     <div class="trwrap"><canvas id="seCan"></canvas></div>
-    ${o.img ? `<label class="trov">Screenshot <input type="range" id="seOp" min="0" max="100" value="45" style="flex:1"></label>` : ''}
+    ${o.img ? `<label class="trov">Compare with screenshot <input type="range" id="seOp" min="0" max="100" value="0" style="flex:1"></label>` : ''}
     <div class="trlist" id="seList"></div>
     <p class="rm" id="seNote"></p>
     <div class="rbtns">${o.back ? '<button class="rb ghost" id="seBack">Back</button>' : ''}<button class="rb ghost" id="seUndo">Undo</button><button class="rb main" id="seSave">Save shots</button></div>`);
