@@ -1,4 +1,4 @@
-# The Crown Yardage Book
+# The Yardage Book
 
 A mobile-friendly yardage book and 3D course view for The Crown Golf Club, Traverse City, Michigan.
 
