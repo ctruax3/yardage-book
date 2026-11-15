@@ -860,10 +860,22 @@ function editTracedHole(roundId, hole) {
 }
 function saveTrace(pts, onGreen) {
   const day = tr.date || new Date().toISOString().slice(0, 10), when = new Date(day + 'T12:00:00').toISOString();
-  // one traced round per date and tee; re-tracing a hole replaces it
-  let r = data.rounds.find(x => isImported(x) && x.course === COURSE_ID && x.started_at.slice(0, 10) === when.slice(0, 10) && x.tee === tr.tee);
+  // traced rounds are grouped by date and tees; a hole that's already traced in that group
+  // gets a choice: keep both (a separate round) or replace it
+  const same = data.rounds.filter(x => isImported(x) && x.course === COURSE_ID && x.started_at.slice(0, 10) === when.slice(0, 10) && x.tee === tr.tee);
+  let r = same.find(x => !roundShots(x.id, tr.hole).length);
+  const taken = same.find(x => roundShots(x.id, tr.hole).length);
+  if (taken && !tr.choice) {
+    openSheet(`<h3>Hole ${tr.hole} is already traced for this date</h3>
+      <p class="rm">Is this screenshot another round on hole ${tr.hole}, or a fix for the one you traced before?</p>
+      <div class="rbtns" style="flex-direction:column"><button class="rb main" id="tcBoth">Another round (keep both)</button><button class="rb" id="tcRep">Replace the earlier one</button><button class="rb ghost" id="tcBack">Back</button></div>`);
+    $('tcBoth').onclick = () => { tr.choice = 'both'; saveTrace(pts, onGreen); };
+    $('tcRep').onclick = () => { tr.choice = 'replace'; saveTrace(pts, onGreen); };
+    $('tcBack').onclick = () => traceReview();
+    return;
+  }
+  if (tr.choice === 'replace' && taken) { r = taken; roundShots(r.id, tr.hole).forEach(removeShot); }
   if (!r) { r = { id: uuid(), course: COURSE_ID, tee: tr.tee, started_at: when, ended_at: when, status: 'imported', weather: null }; upsertRound(r); }
-  roundShots(r.id, tr.hole).forEach(removeShot);
   pts.forEach((en, i) => {
     const ll = G.toLL(en[0], en[1]), last = i === pts.length - 1;
     addShot({ id: uuid(), round_id: r.id, hole: tr.hole, seq: i + 1, kind: last ? (onGreen ? 'ongreen' : 'end') : 'shot', club: last ? null : (tr.clubs[i] || null),
