@@ -46,7 +46,7 @@ function deleteRound(r) {
   data.rounds = data.rounds.filter(x => x.id !== r.id);
   data.scores = data.scores.filter(x => x.round_id !== r.id);
   data.shots = data.shots.filter(x => x.round_id !== r.id);
-  save(); queue('rounds', 'delete', { id: r.id });
+  save(); queue('rounds', 'delete', { id: r.id }); unpostFeed(r.id);
 }
 
 /* ------------------------------------------------------------------ geo */
@@ -120,6 +120,7 @@ function endRound() {
   const r = activeRound(); if (!r) return;
   r.status = 'done'; r.ended_at = nowIso(); upsertRound(r);
   stopGPS(); location.hash = 'card'; render();
+  postFeed(roundFeedItem(r));
 }
 function lastPlayedHole(r) {
   const holes = new Set(roundShots(r.id).map(s => s.hole).concat(data.scores.filter(s => s.round_id === r.id && s.score != null).map(s => s.hole)));
@@ -293,6 +294,27 @@ function ensureChrome() {
   .crow{display:grid;grid-template-columns:1.6fr 1fr 1fr .8fr;gap:8px;align-items:end;padding:8px 0;border-bottom:1px solid var(--rule)}
   @media (max-width:520px){.crow{grid-template-columns:1fr 1fr .8fr}.crow .cname{grid-column:1/-1}}
   .rsheet{max-width:640px}
+  #homeView{display:grid;gap:12px;align-content:start}#homeView[hidden]{display:none}
+  .hgreet h2{margin:4px 2px 0;font:700 26px/1.1 var(--display);letter-spacing:.02em}
+  .hcard .hrow{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+  .hcard .k{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}.hcard .v{font:700 54px/1 var(--display);color:var(--pine)}
+  .hspark{flex:0 1 180px;min-width:0}.hspark svg{width:100%;height:auto}
+  .rb.big{width:100%;min-height:54px;font-size:19px}
+  .bhead{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}.bhead h3,.feedwrap h3{margin:0;font:700 18px var(--display);letter-spacing:.06em;text-transform:uppercase}
+  .seg2{display:flex;border:1px solid var(--rule);border-radius:999px;overflow:hidden}.seg2 button{border:0;background:transparent;padding:7px 11px;font:600 13px var(--display);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);cursor:pointer}.seg2 button[aria-pressed="true"]{background:var(--pine);color:#fff}
+  .board{list-style:none;margin:0;padding:0}.board li{display:grid;grid-template-columns:22px 36px 1fr auto;gap:10px;align-items:center;padding:8px 2px;border-bottom:1px solid var(--rule)}.board li.me{background:#f1f6ef}
+  .board .rk{font:700 16px var(--display);color:var(--muted);text-align:center}.board .nm{font-weight:600}.board .val{font:700 22px var(--display)}.board .val small{font:500 12px var(--body);color:var(--muted)}
+  .av{width:36px;height:36px;border-radius:50%;background:var(--pine);color:#fff;display:inline-flex;align-items:center;justify-content:center;font:700 14px var(--display);letter-spacing:.04em;flex:0 0 auto}
+  .feedwrap{display:grid;gap:10px}.feedwrap h3{margin:4px 2px 0}
+  .feed{background:var(--card);border:1px solid var(--rule);border-radius:14px;padding:12px 14px}
+  .fhead{display:grid;grid-template-columns:36px 1fr auto;gap:10px;align-items:center}.fhead small{display:block;color:var(--muted);font-size:13px;margin-top:2px}
+  .fscore{text-align:right}.fscore b{display:block;font:700 32px/1 var(--display)}.fscore small{color:var(--muted);font-size:13px}
+  .fchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.fchips span{background:#eef3ec;border-radius:999px;padding:4px 10px;font-size:13px}
+  .feed details{margin-top:8px}.feed summary{cursor:pointer;color:var(--pine);font-weight:600;font-size:14px}
+  table.fcard{border-collapse:collapse;margin-top:6px;font-size:13px}table.fcard th{text-align:left;padding:3px 8px 3px 0;color:var(--muted);font-weight:500}table.fcard td{text-align:center;min-width:24px;padding:3px 2px}
+  table.fcard td.bd{color:#fff;background:var(--flag);border-radius:50%}table.fcard td.bg{outline:1px solid var(--ink)}table.fcard td.db{outline:3px double var(--ink)}
+  .frlist{display:grid;gap:4px;margin-top:6px}.frrow{display:grid;grid-template-columns:36px 1fr auto;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--rule)}.frrow small{color:var(--muted)}
+  .priv{display:grid;gap:2px;margin:6px 0 10px}
   .pastwrap{position:absolute;left:10px;bottom:58px;z-index:3;display:flex;gap:6px;flex-wrap:wrap}.pastwrap[hidden]{display:none}
   .pastwrap .chip[aria-pressed="false"]{opacity:.6;text-decoration:line-through}
   .howto{background:#f3f7f2;border:1px solid var(--rule);border-radius:10px;padding:10px 12px;font-size:14px;line-height:1.45}.howto summary{cursor:pointer;font-weight:700;color:var(--ink)}.howto ol{margin:0;padding-left:18px;display:grid;gap:4px}
@@ -327,6 +349,7 @@ function ensureChrome() {
   $('stage').appendChild(bar);
   const acct = document.createElement('div'); acct.className = 'acct'; acct.id = 'rAcct';
   document.querySelector('header.top').appendChild(acct);
+  const hv = document.createElement('section'); hv.id = 'homeView'; hv.hidden = true; $('holeView').before(hv);
   const pv = document.createElement('section'); pv.id = 'profileView'; pv.hidden = true;
   $('cardView').after(pv);
   const my = document.createElement('div'); my.className = 'myc'; my.id = 'myCard';
@@ -402,6 +425,7 @@ function renderAcct() {
     parts.push(`<button class="rb" id="rCardBtn">Scorecard</button><button class="rb ghost" id="rEnd">End round${thru ? ' · thru ' + thru : ''}</button>`);
   } else parts.push(`<button class="rb main" id="rStart" style="min-height:36px;font-size:15px">Start round</button>`);
   const hcx = handicap(), ixu = indexInUse();
+  parts.unshift(`<button class="rb" id="rHome">Home</button>`);
   parts.push(`<button class="rb" id="rProf">Profile${ixu ? ' · ' + fmtIx(ixu.v) : ''}</button>`);
   if (sync.enabled) {
     parts.push(sync.user ? `<span class="who">${esc(sync.user.email || 'Signed in')}${outbox.length ? ' · syncing' : ''}</span><button class="rb ghost" id="rOut">Sign out</button>`
@@ -415,6 +439,7 @@ function renderAcct() {
   };
   if ($('rCardBtn')) $('rCardBtn').onclick = () => location.hash = 'card';
   $('rProf').onclick = () => location.hash = 'profile';
+  if ($('rHome')) $('rHome').onclick = () => { location.hash = 'home'; };
   if ($('rIn')) $('rIn').onclick = () => sync.signIn();
   if ($('rOut')) $('rOut').onclick = () => sync.signOut();
 }
@@ -888,6 +913,201 @@ function saveTrace(pts, onGreen) {
   toast(`Saved ${pts.length - 1} shots on hole ${hole}`);
 }
 
+
+/* ------------------------------------------------------------------ home + social */
+const LS_SOCIAL = 'yb-social-v1', LS_PENDFOLLOW = 'yb-pending-follow';
+let social = store.get(LS_SOCIAL, { following: [], profiles: {}, feed: [], loadedAt: 0 });
+let socialSetup = true, socialLoading = false, boardMode = 'index';
+const displayName = () => (sync.user && ((sync.user.user_metadata || {}).full_name || (sync.user.user_metadata || {}).name)) || profile.display_name || 'Golfer';
+const initials = n => String(n || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?';
+const firstName = n => String(n || '').split(/\s+/)[0] || '';
+function timeAgo(iso) {
+  const d = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (d < 3600) return Math.max(1, Math.round(d / 60)) + 'm ago';
+  if (d < 86400) return Math.round(d / 3600) + 'h ago';
+  if (d < 86400 * 7) return Math.round(d / 86400) + 'd ago';
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+const toParTxt = n => n === 0 ? 'E' : (n > 0 ? '+' : '') + n;
+
+// what goes in the feed for a round finished in the app
+function roundFeedItem(r) {
+  const sc = data.scores.filter(s => s.round_id === r.id && s.score != null).sort((a, b) => a.hole - b.hole);
+  if (!sc.length) return null;
+  let gross = 0, par = 0, putts = 0, nPutt = 0, b = 0, e = 0, p = 0, gir = 0, fw = 0, fwN = 0;
+  const card = sc.map(s => {
+    const hp = YB.H[s.hole - 1].par, d = s.score - hp; gross += s.score; par += hp;
+    if (s.putts != null) { putts += s.putts; nPutt++; if (s.score - s.putts <= hp - 2) gir++; }
+    if (d <= -2) e++; else if (d === -1) b++; else if (d === 0) p++;
+    if (hp > 3 && s.fairway) { fwN++; if (s.fairway === 'hit') fw++; }
+    return { n: s.hole, par: hp, s: s.score };
+  });
+  const rec = (hcCache || handicap() || { records: [] }).records.find(x => x.id === r.id);
+  return { id: r.id, played_on: r.started_at, course: 'The Crown Golf Club', tee: r.tee, holes: sc.length, gross, par,
+    differential: rec && rec.diff != null ? +(rec.diff + (rec.adj || 0)).toFixed(1) : null,
+    stats: { eagles: e, birdies: b, pars: p, putts: nPutt ? putts : null, gir: nPutt ? gir : null, fw: fwN ? fw + '/' + fwN : null }, card, updated_at: nowIso() };
+}
+function postFeed(item) { if (item && sync.user) queue('feed_items', 'upsert', item); }
+function unpostFeed(id) { if (sync.user) queue('feed_items', 'delete', { id }); social.feed = social.feed.filter(f => f.id !== id); store.set(LS_SOCIAL, social); }
+
+// my public card: name, index, privacy switches (never the email)
+let lastPub = '';
+function publishProfile(force) {
+  if (!sync.user) return;
+  const h = hcCache || handicap();
+  const row = { user_id: sync.user.id, display_name: displayName(), idx: h && h.index != null ? h.index : null, low_idx: h && h.low != null ? h.low : null,
+    rounds: crownScores().length + data.posted.length, share: profile.share !== false, discoverable: profile.discoverable !== false };
+  const key = JSON.stringify(row); if (key === lastPub && !force) return; lastPub = key;
+  queue('public_profiles', 'upsert', Object.assign({ updated_at: nowIso() }, row));
+}
+
+// rounds finished before the feed existed (or while it wasn't set up): post the last 60 days once
+function backfillFeed() {
+  if (!sync.user) return;
+  const flag = 'yb-feed-backfill-' + sync.user.id; if (store.get(flag, false)) return;
+  const since = Date.now() - 60 * 864e5;
+  data.rounds.filter(r => r.status === 'done' && r.course === COURSE_ID && new Date(r.started_at).getTime() >= since).forEach(r => postFeed(roundFeedItem(r)));
+  store.set(flag, true); sync.flushSoon();
+}
+async function loadSocial() {
+  if (!sync.user || !sync.client || socialLoading) return;
+  socialLoading = true;
+  try {
+    const me = sync.user.id;
+    const f = await sync.client.from('follows').select('id,followee').eq('follower', me);
+    if (f.error) { if (isSetupError(f.error)) socialSetup = false; throw f.error; }
+    socialSetup = true;
+    social.following = f.data;
+    const ids = [me].concat(f.data.map(x => x.followee));
+    const [pp, fi] = await Promise.all([
+      sync.client.from('public_profiles').select('*').in('user_id', ids),
+      sync.client.from('feed_items').select('*').in('user_id', ids).order('played_on', { ascending: false }).limit(60)
+    ]);
+    if (!pp.error) { social.profiles = {}; pp.data.forEach(p => social.profiles[p.user_id] = p); }
+    if (!fi.error) social.feed = fi.data;
+    social.loadedAt = Date.now(); store.set(LS_SOCIAL, social);
+  } catch (e) { console.warn('social', e); }
+  socialLoading = false;
+  renderHome();
+}
+async function follow(id, name) {
+  if (!sync.user) return;
+  const { data: row, error } = await sync.client.from('follows').insert({ followee: id }).select().single();
+  if (error && !/duplicate/i.test(error.message || '')) { toast("Couldn't follow right now"); return; }
+  if (row) social.following.push({ id: row.id, followee: id });
+  toast(`Following ${firstName(name) || 'them'}`); loadSocial();
+}
+async function unfollow(id) {
+  const f = social.following.find(x => x.followee === id); if (!f) return;
+  const { error } = await sync.client.from('follows').delete().eq('id', f.id);
+  if (error) { toast("Couldn't unfollow right now"); return; }
+  social.following = social.following.filter(x => x !== f); social.feed = social.feed.filter(x => x.user_id !== id); store.set(LS_SOCIAL, social);
+  renderHome(); toast('Unfollowed');
+}
+const inviteLink = () => location.origin + location.pathname + '#follow-' + sync.user.id;
+
+function openFriends() {
+  if (!sync.user) { sync.signIn(); return; }
+  const fol = social.following.map(f => social.profiles[f.followee] || { user_id: f.followee, display_name: 'Golfer' });
+  openSheet(`<h3>Friends</h3>
+    <div class="aform"><label>Find by name<input id="frQ" placeholder="Start typing a name" autocomplete="off"></label></div>
+    <div id="frRes" class="frlist"></div>
+    <div class="rbtns" style="margin:10px 0"><button class="rb main" id="frInvite">Send an invite link</button></div>
+    <p class="rm">Anyone who opens your link and signs in can follow you with one tap.</p>
+    ${fol.length ? `<h3 style="margin-top:14px">Following · ${fol.length}</h3><div class="frlist">${fol.map(p => `<div class="frrow"><span class="av">${esc(initials(p.display_name))}</span><span>${esc(p.display_name || 'Golfer')}<small>${p.idx != null ? ' · ' + fmtIx(p.idx) : ''}</small></span><button class="rb ghost" data-unf="${p.user_id}">Unfollow</button></div>`).join('')}</div>` : ''}`);
+  let t = null;
+  $('frQ').oninput = () => { clearTimeout(t); t = setTimeout(async () => {
+    const q = $('frQ').value.trim(); if (q.length < 2) { $('frRes').innerHTML = ''; return; }
+    const { data: rows, error } = await sync.client.from('public_profiles').select('user_id,display_name,idx').ilike('display_name', '%' + q.replace(/[%_]/g, '') + '%').neq('user_id', sync.user.id).limit(15);
+    if (error) { $('frRes').innerHTML = `<p class="rm">${isSetupError(error) ? 'Friends aren\'t set up yet (database update 004_social.sql).' : "Search isn't available right now."}</p>`; return; }
+    const fset = new Set(social.following.map(f => f.followee));
+    $('frRes').innerHTML = rows.length ? rows.map(p => `<div class="frrow"><span class="av">${esc(initials(p.display_name))}</span><span>${esc(p.display_name || 'Golfer')}<small>${p.idx != null ? ' · ' + fmtIx(p.idx) : ''}</small></span>${fset.has(p.user_id) ? '<small class="rm">Following</small>' : `<button class="rb" data-fol="${p.user_id}" data-n="${esc(p.display_name || '')}">Follow</button>`}</div>`).join('') : '<p class="rm">No one by that name yet. Send them an invite link.</p>';
+    $('frRes').querySelectorAll('[data-fol]').forEach(b => b.onclick = async () => { b.disabled = true; await follow(b.dataset.fol, b.dataset.n); b.outerHTML = '<small class="rm">Following</small>'; });
+  }, 250); };
+  $('frInvite').onclick = async () => {
+    const url = inviteLink(), text = `Follow me on The Yardage Book`;
+    try { if (navigator.share) { await navigator.share({ title: 'The Yardage Book', text, url }); return; } } catch (e) { return; }
+    try { await navigator.clipboard.writeText(url); toast('Invite link copied'); } catch (e) { prompt('Copy your invite link', url); }
+  };
+  document.querySelectorAll('[data-unf]').forEach(b => b.onclick = () => { closeSheet(); unfollow(b.dataset.unf); });
+}
+// someone opened an invite link
+async function handleFollowLink() {
+  const m = location.hash.match(/^#follow-([0-9a-f-]{36})$/);
+  const id = m ? m[1] : store.get(LS_PENDFOLLOW, null);
+  if (!id) return;
+  if (m) history.replaceState(null, '', location.pathname + '#home');
+  if (!sync.user) { store.set(LS_PENDFOLLOW, id); if (m) { location.hash = 'home'; openSheet(`<h3>Follow a friend</h3><p class="rm">Sign in to follow them and see their rounds.</p><div class="rbtns"><button class="rb main" id="flIn">Sign in with Google</button></div>`); $('flIn').onclick = () => sync.signIn(); } return; }
+  store.set(LS_PENDFOLLOW, null);
+  if (id === sync.user.id) { location.hash = 'home'; return; }
+  const { data: p } = await sync.client.from('public_profiles').select('user_id,display_name,idx').eq('user_id', id).maybeSingle();
+  const name = (p && p.display_name) || 'this golfer';
+  location.hash = 'home';
+  if (social.following.some(f => f.followee === id)) { toast(`You already follow ${firstName(name)}`); return; }
+  openSheet(`<h3>Follow ${esc(name)}?</h3><p class="rm">You'll see their rounds on your Home feed and they'll show on your leaderboard.</p><div class="rbtns"><button class="rb main" id="flYes">Follow</button><button class="rb ghost" id="flNo">Not now</button></div>`);
+  $('flYes').onclick = () => { closeSheet(); follow(id, name); }; $('flNo').onclick = closeSheet;
+}
+
+function feedCard(f) {
+  const p = social.profiles[f.user_id] || {}, me = sync.user && f.user_id === sync.user.id, name = me ? 'You' : (p.display_name || 'Golfer');
+  const st = f.stats || {}, tp = f.gross != null && f.par ? f.gross - f.par : null;
+  const chips = [st.eagles ? `${st.eagles} eagle${st.eagles > 1 ? 's' : ''}` : '', st.birdies ? `${st.birdies} birdie${st.birdies > 1 ? 's' : ''}` : '', st.pars ? `${st.pars} pars` : '', st.putts != null ? `${st.putts} putts` : '', st.gir != null ? `${st.gir} GIR` : ''].filter(Boolean);
+  const card = (f.card || []), nine = a => a.length ? `<tr><th>Hole</th>${a.map(c => `<td>${c.n}</td>`).join('')}</tr><tr><th>Par</th>${a.map(c => `<td>${c.par}</td>`).join('')}</tr><tr><th>Score</th>${a.map(c => `<td class="${c.s - c.par <= -1 ? 'bd' : c.s - c.par >= 2 ? 'db' : c.s - c.par === 1 ? 'bg' : ''}">${c.s}</td>`).join('')}</tr>` : '';
+  return `<article class="feed">
+    <div class="fhead"><span class="av">${esc(initials(me ? displayName() : p.display_name))}</span><div><b>${esc(name)}</b><small>${esc(timeAgo(f.played_on))} · ${esc(f.course || '')}${f.tee ? ' · ' + esc(f.tee) : ''}</small></div>
+      <div class="fscore"><b>${f.gross ?? '–'}</b><small>${tp == null ? '' : toParTxt(tp)}${f.holes && f.holes < 18 ? ' · ' + f.holes + ' holes' : ''}</small></div></div>
+    ${chips.length ? `<div class="fchips">${chips.map(c => `<span>${esc(c)}</span>`).join('')}</div>` : ''}
+    ${card.length ? `<details><summary>Scorecard</summary><div class="cardview"><table class="fcard">${nine(card.filter(c => c.n <= 9))}</table>${card.some(c => c.n > 9) ? `<table class="fcard">${nine(card.filter(c => c.n > 9))}</table>` : ''}</div></details>` : ''}
+  </article>`;
+}
+function boardRows() {
+  const ids = sync.user ? [sync.user.id].concat(social.following.map(f => f.followee)) : [];
+  const since = Date.now() - 90 * 864e5;
+  return ids.map(id => {
+    const p = social.profiles[id] || {}, me = sync.user && id === sync.user.id;
+    const h = me ? (hcCache || handicap()) : null;
+    const idx = me ? (h && h.index != null ? h.index : null) : p.idx;
+    const best = social.feed.filter(f => f.user_id === id && f.holes >= 18 && new Date(f.played_on).getTime() >= since).sort((a, b) => (a.differential ?? 99) - (b.differential ?? 99) || a.gross - b.gross)[0];
+    return { id, me, name: me ? 'You' : (p.display_name || 'Golfer'), idx, best };
+  });
+}
+function renderHome() {
+  const el = $('homeView'); if (!el) return;
+  const show = /^#?(home)?$/.test(location.hash) && !/^#hole-/.test(location.hash);
+  el.hidden = !show; if (!show) return;
+  const h = hcCache || handicap(), active = activeRound();
+  const hr = new Date().getHours(), greet = hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening';
+  const name = sync.user ? firstName(displayName()) : '';
+  const rows = boardRows().sort((a, b) => boardMode === 'index' ? (a.idx ?? 99) - (b.idx ?? 99) : ((a.best ? a.best.differential ?? a.best.gross - 50 : 999) - (b.best ? b.best.differential ?? b.best.gross - 50 : 999)));
+  const feed = social.feed.slice().sort((a, b) => b.played_on.localeCompare(a.played_on)).slice(0, 30);
+  // my own finished rounds show in the feed even before they sync
+  const mine = sync.user ? [] : data.rounds.filter(r => r.status === 'done' && r.course === COURSE_ID).sort((a, b) => b.started_at.localeCompare(a.started_at)).slice(0, 5).map(r => Object.assign({ user_id: 'local' }, roundFeedItem(r))).filter(x => x.id);
+  el.innerHTML = `
+    <div class="hgreet"><h2>${greet}${name ? ', ' + esc(name) : ''}</h2></div>
+    <div class="box hcard">
+      <div class="hrow"><div><div class="k">Handicap Index</div><div class="v">${fmtIx(h && h.index)}</div><div class="rm">${h && h.index != null ? `Low ${fmtIx(h.low)} · ${h.counting} score${h.counting === 1 ? '' : 's'}` : 'Post 3 scores to get an Index'}</div></div>
+        ${h && h.history.length > 1 ? `<div class="hspark">${trendSvg(h.history.slice(-20))}</div>` : ''}</div>
+      ${active ? `<button class="rb main big" id="hmResume">Resume round · hole ${lastPlayedHole(active) || 1}</button>` : `<button class="rb main big" id="hmPlay">Play The Crown</button>`}
+    </div>
+    ${!sync.enabled ? '' : !sync.user ? `<div class="box"><h3>Play with friends</h3><p class="rm">Sign in to follow friends, see their rounds and compare on a leaderboard.</p><button class="rb main" id="hmIn">Sign in with Google</button></div>`
+    : !socialSetup ? `<div class="box warn">Friends and the feed need one more database update (supabase/004_social.sql).</div>`
+    : `<div class="box">
+        <div class="bhead"><h3>Leaderboard</h3><div class="seg2"><button data-bm="index" aria-pressed="${boardMode === 'index'}">Index</button><button data-bm="best" aria-pressed="${boardMode === 'best'}">Best · 90 days</button></div></div>
+        ${rows.length > 1 ? `<ol class="board">${rows.map((r, i) => `<li class="${r.me ? 'me' : ''}"><span class="rk">${i + 1}</span><span class="av">${esc(initials(r.me ? displayName() : r.name))}</span><span class="nm">${esc(r.name)}</span><span class="val">${boardMode === 'index' ? fmtIx(r.idx) : r.best ? `${r.best.gross}<small> ${r.best.differential != null ? '· ' + r.best.differential.toFixed(1) : ''}</small>` : '–'}</span></li>`).join('')}</ol>`
+          : `<p class="rm">Follow friends to see how you stack up.</p>`}
+        <div class="rbtns"><button class="rb" id="hmFriends">${social.following.length ? 'Friends · ' + social.following.length : 'Find friends'}</button></div>
+      </div>`}
+    <div class="feedwrap"><h3>${sync.user ? 'Recent rounds' : 'Your recent rounds'}</h3>
+      ${(sync.user ? feed : mine).length ? (sync.user ? feed : mine).map(feedCard).join('') : `<p class="rm">${sync.user ? 'Finished rounds from you and the people you follow show up here.' : 'Finish a round and it shows up here.'}</p>`}
+      ${socialLoading ? '<p class="rm">Loading…</p>' : ''}</div>`;
+  const go = () => { location.hash = 'hole-' + (active ? (lastPlayedHole(active) || 1) : 1); };
+  if ($('hmPlay')) $('hmPlay').onclick = go; if ($('hmResume')) $('hmResume').onclick = go;
+  if ($('hmIn')) $('hmIn').onclick = () => sync.signIn();
+  if ($('hmFriends')) $('hmFriends').onclick = openFriends;
+  el.querySelectorAll('[data-bm]').forEach(b => b.onclick = () => { boardMode = b.dataset.bm; renderHome(); });
+  if (sync.user && Date.now() - social.loadedAt > 60e3 && !socialLoading) loadSocial();
+}
+
 /* ------------------------------------------------------------------ sync (Supabase) */
 const sync = {
   enabled: false, client: null, user: null, busy: false, timer: null,
@@ -921,6 +1141,7 @@ const sync = {
     }
     await this.flush();
     await this.pull();
+    publishProfile(true); loadSocial().then(handleFollowLink); backfillFeed();
   },
   async pull() {
     if (!this.user) return;
@@ -975,16 +1196,17 @@ const sync = {
         else {
           // send runs of upserts to the same table in one request (imports can be hundreds of rows)
           const batch = [strip(o.row)];
-          while (n < outbox.length && n < 200 && outbox[n].op === 'upsert' && outbox[n].table === o.table && o.table !== 'profiles') { batch.push(strip(outbox[n].row)); n++; }
-          const conflict = o.table === 'hole_scores' ? 'round_id,hole' : o.table === 'profiles' ? 'user_id' : 'id';
+          while (n < outbox.length && n < 200 && outbox[n].op === 'upsert' && outbox[n].table === o.table && o.table !== 'profiles' && o.table !== 'public_profiles') { batch.push(strip(outbox[n].row)); n++; }
+          const conflict = o.table === 'hole_scores' ? 'round_id,hole' : (o.table === 'profiles' || o.table === 'public_profiles') ? 'user_id' : 'id';
           // de-duplicate within a batch (same row edited twice): keep the last version
           const keyOf = x => o.table === 'hole_scores' ? x.round_id + ':' + x.hole : x.id;
           const uniq = [...new Map(batch.map(x => [keyOf(x), x])).values()];
-          res = await this.client.from(o.table).upsert(o.table === 'profiles' ? uniq[0] : uniq, { onConflict: conflict });
+          res = await this.client.from(o.table).upsert((o.table === 'profiles' || o.table === 'public_profiles') ? uniq[0] : uniq, { onConflict: conflict });
         }
         if (res.error) {
           console.warn('sync error', o, res.error);
           // database not set up yet (table or column missing): keep everything queued until it is
+          if (isSetupError(res.error) && /^(feed_items|follows|public_profiles)$/.test(o.table)) { socialSetup = false; outbox.splice(0, n); store.set(LS_OUTBOX, outbox); continue; }
           if (isSetupError(res.error)) { this.setupNeeded = true; renderProfile(); break; }
           if (/JWT|auth|fetch|network/i.test(res.error.message || '')) break;
         } else if (this.setupNeeded && o.table !== 'courses') { this.setupNeeded = false; renderProfile(); }
@@ -1055,7 +1277,7 @@ function courseHcp(tee) {
 const fmtIx = v => v == null ? '–' : v < 0 ? '+' + Math.abs(v).toFixed(1) : v.toFixed(1);
 
 function upsertPosted(p) { p.updated_at = nowIso(); const i = data.posted.findIndex(x => x.id === p.id); if (i < 0) data.posted.push(p); else data.posted[i] = p; save(); queue('posted_scores', 'upsert', p); }
-function deletePosted(p) { data.posted = data.posted.filter(x => x.id !== p.id); save(); queue('posted_scores', 'delete', { id: p.id }); }
+function deletePosted(p) { data.posted = data.posted.filter(x => x.id !== p.id); save(); queue('posted_scores', 'delete', { id: p.id }); unpostFeed(p.id); }
 
 function stats() {
   const rounds = data.rounds.filter(r => r.course === COURSE_ID && r.status === 'done');
@@ -1115,6 +1337,7 @@ function renderProfile() {
     <div class="box">
       <h2>${esc(name)}</h2>
       ${sync.enabled ? `<p class="rm acctline">${sync.user ? `Signed in as ${esc(sync.user.email || '')} · <a href="#" id="pfOut">Sign out</a>` : `<button class="rb" id="pfIn">Sign in with Google</button> to keep your scores on every device`}</p>` : ''}
+      ${sync.user ? `<div class="priv"><label class="trov"><input type="checkbox" id="pfShare" ${profile.share !== false ? 'checked' : ''}> Show my rounds to people who follow me</label><label class="trov"><input type="checkbox" id="pfDisc" ${profile.discoverable !== false ? 'checked' : ''}> Let people find me by name</label></div>` : ''}
       <div class="hix"><div><div class="k">Handicap Index</div><div class="v">${fmtIx(hc && hc.index)}</div>
         <div class="rm">${hc && hc.index != null ? `From ${hc.counting} score${hc.counting === 1 ? '' : 's'}${hc.counting < 20 ? ' (uses the fewer-than-20 table)' : ', best 8 of the last 20'}` : `Post ${Math.max(0, 3 - (hc ? hc.counting : 0))} more 18-hole score${3 - (hc ? hc.counting : 0) === 1 ? '' : 's'} (or 9-hole pairs) to get an Index`}</div></div>
         <div><div class="k">Low (12 mo)</div><div class="v sm">${fmtIx(hc && hc.low)}</div></div></div>
@@ -1155,6 +1378,8 @@ function renderProfile() {
     openSheet(`<h3>Delete these traced shots?</h3><p class="rm">Removes every shot traced for this date.</p><div class="rbtns"><button class="rb" id="dtYes" style="background:var(--flag);color:#fff;border-color:var(--flag)">Delete</button><button class="rb ghost" id="dtNo">Cancel</button></div>`);
     $('dtYes').onclick = () => { deleteRound(x); closeSheet(); render(); YB.refresh(); }; $('dtNo').onclick = closeSheet; });
   $('pfAdd').onclick = openAddScore;
+  if ($('pfShare')) $('pfShare').onchange = e => { profile.share = e.target.checked; store.set(LS_PROFILE, profile); publishProfile(true); toast(e.target.checked ? 'Followers can see your rounds' : 'Your rounds are private'); };
+  if ($('pfDisc')) $('pfDisc').onchange = e => { profile.discoverable = e.target.checked; store.set(LS_PROFILE, profile); publishProfile(true); toast(e.target.checked ? 'People can find you by name' : 'Only your invite link finds you now'); };
   if ($('pfOut')) $('pfOut').onclick = e => { e.preventDefault(); sync.signOut(); };
   if ($('pfIn')) $('pfIn').onclick = () => sync.signIn();
   $('pfImport').onclick = openImport;
@@ -1188,6 +1413,7 @@ function openAddScore() {
         </div>
       </div>
 
+      ${sync.user ? '<label class="trov"><input type="checkbox" id="asShare" checked> Share with friends</label>' : ''}
       <p class="rm" id="asErr" style="color:var(--flag)"></p>
       <div class="rbtns"><button class="rb main" type="submit">Add score</button></div>
     </form>`);
@@ -1218,6 +1444,7 @@ function openAddScore() {
     const err = m => { $('asErr').textContent = m; };
     const date = $('asDate').value, courseName = (course && course.name) || document.querySelector('#asCoursePick .cp-in').value.trim();
     if (!date || !courseName) return err('Add a date and course.');
+    const shareIt = !!($('asShare') && $('asShare').checked);
     const p = { id: uuid(), played_on: new Date(date + 'T12:00:00').toISOString(), course: courseName, course_id: null, tee: null, holes: 18, gross: null, ags: null, course_rating: null, slope: null, par: null, differential: null };
     if (mode === 'diff') {
       const d = parseFloat($('asDiff').value.replace('+', '-')); if (isNaN(d) || d < -10 || d > 80) return err('Enter the differential, like 14.2.');
@@ -1239,6 +1466,8 @@ function openAddScore() {
       Object.assign(p, { course: c.name, course_id: c.id && !/^(crown|tmp-)/.test(c.id) && (c.source !== 'user' || sync.user) ? c.id : null, tee: t.name, holes, ags, gross: ags, course_rating: t.rating, slope: t.slope, par: t.par });
     }
     upsertPosted(p); closeSheet(); render(); toast('Score added');
+    if (shareIt && p.ags != null) { const rec = (hcCache || handicap() || { records: [] }).records.find(x => x.id === p.id);
+      postFeed({ id: p.id, played_on: p.played_on, course: p.course, tee: p.tee, holes: p.holes, gross: p.ags, par: p.par, differential: rec && rec.diff != null ? +(rec.diff + (rec.adj || 0)).toFixed(1) : null, stats: {}, card: [], updated_at: nowIso() }); }
   };
 }
 function openRatings() {
@@ -1541,7 +1770,7 @@ function undoLastImport() {
 }
 
 /* ------------------------------------------------------------------ wiring */
-function render() { hcCache = null; renderAcct(); renderBar(); renderMyCard(); renderProfile(); renderPastBtn(); }
+function render() { hcCache = null; renderAcct(); renderBar(); renderMyCard(); renderProfile(); renderPastBtn(); renderHome(); publishProfile(); }
 function boot() {
   if (!window.YB) return setTimeout(boot, 50);
   G = geoFns();
@@ -1554,10 +1783,10 @@ function boot() {
     if (p.kind === 'ongreen') p.place([e, n], 'map'); else recordShot(p.club, [e, n], 'map');
     return true;
   };
-  window.addEventListener('hashchange', () => { closeSheet(); render(); });
+  window.addEventListener('hashchange', () => { if (/^#follow-/.test(location.hash)) { handleFollowLink(); return; } closeSheet(); render(); });
   if (activeRound()) startGPS();
   render();
-  sync.init();
+  sync.init().then(() => { if (!sync.user) handleFollowLink(); });
   // keep the GPS dot moving on the hole map
   setInterval(() => { if (activeRound() && gps.fix && !/^#card$/.test(location.hash)) YB.refresh2d(); }, 4000);
 }

@@ -33,14 +33,14 @@
     }, { passive: true });
 
     /* tab bar */
-    const view = () => /^#card$/.test(location.hash) ? 'card' : /^#profile$/.test(location.hash) ? 'profile' : 'hole';
+    const view = () => /^#card$/.test(location.hash) ? 'card' : /^#profile$/.test(location.hash) ? 'profile' : /^#hole-\d+$/.test(location.hash) ? 'hole' : 'home';
     let lastHole = (location.hash.match(/^#hole-(\d+)$/) || [])[1] || String(YB.cur());
     const route = () => {
       const v = view(); document.body.dataset.view = v;
       if (v === 'hole') lastHole = String(YB.cur());
       $('tabbar').querySelectorAll('button').forEach(b => b.setAttribute('aria-current', String(b.dataset.go === v)));
       closeDrawer();
-      const sc = v === 'card' ? $('cardView') : v === 'profile' ? $('profileView') : null; if (sc) sc.scrollTop = 0;
+      const sc = v === 'card' ? $('cardView') : v === 'profile' ? $('profileView') : v === 'home' ? $('homeView') : null; if (sc) sc.scrollTop = 0;
     };
     $('tabbar').querySelectorAll('button').forEach(b => b.onclick = () => {
       const go = b.dataset.go;

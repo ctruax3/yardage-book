@@ -2,7 +2,7 @@
   "name": "The Yardage Book",
   "short_name": "Yardage Book",
   "description": "The Crown Golf Club yardage book: 3D hole views, scorecard and shot tracking for The Crown Golf Club.",
-  "start_url": "./#hole-1",
+  "start_url": "./#home",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
