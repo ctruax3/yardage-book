@@ -47,6 +47,7 @@ function deleteRound(r) {
   data.scores = data.scores.filter(x => x.round_id !== r.id);
   data.shots = data.shots.filter(x => x.round_id !== r.id);
   save(); queue('rounds', 'delete', { id: r.id }); unpostFeed(r.id);
+  if (r.game_id) leaveGameRow(r.game_id);
 }
 
 /* ------------------------------------------------------------------ geo */
@@ -106,9 +107,11 @@ async function fetchWeather() {
 }
 
 /* ------------------------------------------------------------------ round flow */
-async function startRound() {
+async function startRound(opts) {
+  const gid = opts && opts.gameId || null;
   const r = { id: uuid(), course: COURSE_ID, tee: YB.tee(), started_at: nowIso(), ended_at: null, status: 'active', weather: null };
   upsertRound(r);
+  if (gid) attachRound(r, gid).then(ok => { if (ok) toast('You joined the group'); }); else ensureGame(r);
   startGPS();
   location.hash = 'hole-1';
   render();
@@ -259,7 +262,7 @@ function ensureChrome() {
   .stp{display:grid;grid-template-columns:1fr auto 52px auto;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--rule)}
   .stp>span{font-weight:600}.stp>b{font:700 28px/1 var(--display);text-align:center;font-variant-numeric:tabular-nums}
   .stp .seg3{grid-column:2/5;display:flex;gap:6px}.stp .seg3 .rb{flex:1;padding:8px 4px;font-size:14px}
-  .rtoast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 14px;border-radius:10px;z-index:60;font-size:14px;box-shadow:0 6px 18px rgba(0,0,0,.3);transition:opacity .3s}
+  .rtoast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 14px;border-radius:10px;z-index:60;font-size:14px;box-shadow:0 6px 18px rgba(0,0,0,.3);transition:opacity .3s;pointer-events:none}
   .acct{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
   .acct .rb{min-height:36px;padding:8px 10px;font-size:14px}
   .acct .who{font-size:13px;color:var(--muted);max-width:40vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}@media (max-width:560px){.acct .who{display:none}}
@@ -339,6 +342,15 @@ function ensureChrome() {
   .box.warn{border-color:#d9a441;background:#fff8e8;margin-bottom:14px;font-size:14px;line-height:1.45}
   .crow label{min-width:0;display:block}.crow input{width:100%;min-width:0;box-sizing:border-box}.crow input::placeholder{color:#b9bfb7}
   .myc tr.strokes td{font-size:12px;color:var(--pine);letter-spacing:-1px}
+  .rgrp{display:flex;gap:14px;overflow-x:auto;white-space:nowrap;cursor:pointer;font-size:13px;color:var(--muted);padding:0 2px 6px;border-bottom:1px solid var(--rule);scrollbar-width:none}
+  .rgrp b{font:700 17px/1 var(--display);color:var(--ink);margin-left:2px}.rgrp small{font-size:11px;margin-left:3px}
+  .gmatch{font:700 20px/1.2 var(--display);color:var(--pine);margin:2px 0 8px;letter-spacing:.02em}
+  .gsub{display:block;font:400 12px var(--body);color:var(--muted)}
+  .myc table.gcard td.gn{text-align:left;font-weight:600;white-space:nowrap}.myc table.gcard tr.gme td{background:#f1f6ef}
+  .gset{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--rule)}.gset>span{font-weight:600}
+  .seg2 button:disabled{cursor:default;opacity:.7}
+  .live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--flag);margin-right:6px;vertical-align:middle;animation:ybpulse 1.6s ease-in-out infinite}
+  @keyframes ybpulse{50%{opacity:.35}}@media (prefers-reduced-motion:reduce){.live-dot{animation:none}}
   @media (min-width:900px){.rsheet{bottom:auto;top:50%;transform:translateY(-50%);border-radius:18px}}
   `;
   document.head.appendChild(css);
@@ -409,11 +421,12 @@ function renderBar() {
   const acc = gps.fix && en ? `±${Math.round(gps.fix.acc * YD)} yd` : '';
   const w = r.weather ? `${Math.round(r.weather.wind_mph)} mph wind · ${Math.round(r.weather.temp_f)}°` : '';
   const pend = pending ? `<div class="rpend"><span>${pending.kind === 'ongreen' ? 'Tap the ball\'s spot on the green' : `Tap the ball's spot for your <b>${esc(pending.club)}</b>`}</span><button class="rb ghost" id="rCancel" style="min-height:34px;padding:6px 10px">Cancel</button></div>` : '';
-  bar.innerHTML = `${pend}<div class="dist">${dist}<div class="meta">Shot ${strokes + 1}${acc ? '<br>' + acc : ''}${w ? '<br>' + w : ''}</div></div>
+  bar.innerHTML = `${groupStrip(r)}${pend}<div class="dist">${dist}<div class="meta">Shot ${strokes + 1}${acc ? '<br>' + acc : ''}${w ? '<br>' + w : ''}</div></div>
     <div class="acts"><button class="rb main" id="rHit">Hit</button><button class="rb" id="rGreen">On green</button><button class="rb" id="rPen">Penalty</button><button class="rb" id="rUndo" ${shots.length ? '' : 'disabled'}>Undo</button><button class="rb" id="rScore">Score${holeScore(r.id, hole) && holeScore(r.id, hole).score != null ? ' · ' + holeScore(r.id, hole).score : ''}</button></div>`;
   $('rScore').onclick = () => openScoreSheet(hole, true);
   $('rHit').onclick = openClubs; $('rGreen').onclick = onGreen; $('rPen').onclick = penalty; $('rUndo').onclick = undo;
   if (pending) $('rCancel').onclick = () => { pending = null; renderBar(); };
+  if ($('rGrp')) $('rGrp').onclick = $('rGrp').onkeydown = e => { if (!e.key || e.key === 'Enter' || e.key === ' ') location.hash = 'card'; };
 }
 
 function renderAcct() {
@@ -486,10 +499,14 @@ function renderMyCard() {
   el.innerHTML = `<h2>${r.status === 'active' ? 'Current round' : 'Round'} · ${date} · ${esc(r.tee || '')}</h2>
     <p class="rm">${t.n ? `<b style="font:700 22px var(--display);color:var(--ink)">${t.s}</b> through ${t.n} · ${t.rel === 0 ? 'even' : (t.rel > 0 ? '+' : '') + t.rel}${netTxt} · ${t.putts} putts · fairways ${t.fw}` : 'Tap any hole to enter a score.'}${ch != null ? `<br>Course handicap ${ch < 0 ? '+' + (-ch) : ch} from the ${esc(r.tee || '')} tees · dots show where you get strokes` : ''}</p>
     <div class="cardview"><table class="sc">${head}${parRow}${ch != null ? row('Strokes', dots).replace('{OUT}', '').replace('{IN}', '').replace('{TOT}', ch).replace('<tr class="">', '<tr class="strokes">') : ''}${fill(row('Score', cell), 'score')}${fill(row('Putts', i => { const sc = holeScore(r.id, i); return `<td>${sc && sc.putts != null ? sc.putts : ''}</td>`; }), 'putts')}${row('Fairway', fwCell).replace('{OUT}', '').replace('{IN}', '').replace('{TOT}', '')}</table></div>
+    ${groupCardHtml(r)}
     ${r.status === 'done' ? `<div class="rbtns"><button class="rb ghost" id="rDel">Delete this round</button></div>` : ''}
     ${others.length ? `<h2 style="margin-top:16px">Past rounds</h2><div class="rlist">${others.map(o => { const tt = totals(o); return `<button class="rb" data-r="${o.id}"><span>${new Date(o.started_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} · ${esc(o.tee || '')}${o.status === 'active' ? ' · in progress' : ''}</span><b>${tt.n ? tt.s : '–'}</b></button>`; }).join('')}</div>` : ''}
     <hr style="border:0;border-top:1px solid var(--rule);margin:16px 0">`;
   el.querySelectorAll('td[data-h]').forEach(td => td.onclick = () => openScoreSheet(+td.dataset.h, false));
+  if ($('gOpen')) $('gOpen').onclick = openGroup;
+  // past group rounds: fetch the others' scores once
+  if (r.game_id && sync.user && !games[r.game_id] && gamesSetup !== false) loadGame(r.game_id, true);
   el.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { viewRoundId = b.dataset.r; renderMyCard(); window.scrollTo({ top: 0 }); });
   if ($('rDel')) $('rDel').onclick = () => {
     openSheet(`<h3>Delete this round?</h3><p class="rm">This removes its scores and shots${sync.user ? ' from your account too' : ''}. It can't be undone.</p><div class="rbtns"><button class="rb" id="rDelYes" style="background:var(--flag);color:#fff;border-color:var(--flag)">Delete round</button><button class="rb ghost" id="rDelNo">Cancel</button></div>`);
@@ -957,6 +974,10 @@ function publishProfile(force) {
   const h = hcCache || handicap();
   const row = { user_id: sync.user.id, display_name: displayName(), idx: h && h.index != null ? h.index : null, low_idx: h && h.low != null ? h.low : null,
     rounds: crownScores().length + data.posted.length, share: profile.share !== false, discoverable: profile.discoverable !== false };
+  if (gamesSetup === true) {
+    const a = activeRound(), live = !!(a && a.game_id && profile.share !== false);
+    Object.assign(row, { live_game: live ? a.game_id : null, live_hole: live ? lastPlayedHole(a) : null, live_at: live ? a.started_at : null });
+  }
   const key = JSON.stringify(row); if (key === lastPub && !force) return; lastPub = key;
   queue('public_profiles', 'upsert', Object.assign({ updated_at: nowIso() }, row));
 }
@@ -986,6 +1007,11 @@ async function loadSocial() {
     if (!pp.error) { social.profiles = {}; pp.data.forEach(p => social.profiles[p.user_id] = p); }
     if (!fi.error) social.feed = fi.data;
     social.loadedAt = Date.now(); store.set(LS_SOCIAL, social);
+    if (gamesSetup !== true) {
+      const t = await sync.client.from('games').select('id').limit(1);
+      gamesSetup = !t.error ? true : isSetupError(t.error) ? false : gamesSetup;
+      if (gamesSetup) { const a = activeRound(); if (a && a.game_id) { subscribeGame(a.game_id); loadGame(a.game_id, true); } else if (a) ensureGame(a); publishProfile(true); }
+    }
   } catch (e) { console.warn('social', e); }
   socialLoading = false;
   renderHome();
@@ -1081,6 +1107,10 @@ function renderHome() {
   const rows = boardRows().sort((a, b) => boardMode === 'index' ? (a.idx ?? 99) - (b.idx ?? 99) : ((a.best ? a.best.differential ?? a.best.gross - 50 : 999) - (b.best ? b.best.differential ?? b.best.gross - 50 : 999)));
   const feed = social.feed.slice().sort((a, b) => b.played_on.localeCompare(a.played_on)).slice(0, 30);
   // my own finished rounds show in the feed even before they sync
+  const ag = active && sync.user ? roundGame(active) : null;
+  const groupHome = ag && ag.players && ag.players.length > 1 ? `<div class="box"><div class="bhead"><h3><span class="live-dot" aria-hidden="true"></span>Your group</h3><small class="rm">${esc(fmtName(ag))}</small></div>${standingsHtml(active)}<div class="rbtns"><button class="rb" id="hmGrpOpen">Group &amp; invite</button></div></div>` : '';
+  const lf = sync.user ? liveFriends() : [];
+  const liveHome = lf.length ? `<div class="box"><div class="bhead"><h3><span class="live-dot" aria-hidden="true"></span>On the course now</h3></div><div class="frlist">${lf.map(p => `<div class="frrow"><span class="av">${esc(initials(p.display_name))}</span><span>${esc(p.display_name || 'Golfer')}<small> · ${p.live_hole ? 'thru ' + p.live_hole : 'just started'}</small></span><button class="rb main" data-join="${p.live_game}">Join</button></div>`).join('')}</div></div>` : '';
   const mine = sync.user ? [] : data.rounds.filter(r => r.status === 'done' && r.course === COURSE_ID).sort((a, b) => b.started_at.localeCompare(a.started_at)).slice(0, 5).map(r => Object.assign({ user_id: 'local' }, roundFeedItem(r))).filter(x => x.id);
   el.innerHTML = `
     <div class="hgreet"><h2>${greet}${name ? ', ' + esc(name) : ''}</h2></div>
@@ -1088,7 +1118,9 @@ function renderHome() {
       <div class="hrow"><div><div class="k">Handicap Index</div><div class="v">${fmtIx(h && h.index)}</div><div class="rm">${h && h.index != null ? `Low ${fmtIx(h.low)} · ${h.counting} score${h.counting === 1 ? '' : 's'}` : 'Post 3 scores to get an Index'}</div></div>
         ${h && h.history.length > 1 ? `<div class="hspark">${trendSvg(h.history.slice(-20))}</div>` : ''}</div>
       ${active ? `<button class="rb main big" id="hmResume">Resume round · hole ${lastPlayedHole(active) || 1}</button>` : `<button class="rb main big" id="hmPlay">Play The Crown</button>`}
+      ${sync.user && gamesSetup !== false ? `<div class="rbtns" style="margin-top:8px"><button class="rb" id="hmGroup">${active ? 'Invite friends to this round' : 'Play with friends'}</button></div>` : ''}
     </div>
+    ${groupHome}${liveHome}
     ${!sync.enabled ? '' : !sync.user ? `<div class="box"><h3>Play with friends</h3><p class="rm">Sign in to follow friends, see their rounds and compare on a leaderboard.</p><button class="rb main" id="hmIn">Sign in with Google</button></div>`
     : !socialSetup ? `<div class="box warn">Friends and the feed need one more database update (supabase/004_social.sql).</div>`
     : `<div class="box">
@@ -1101,11 +1133,243 @@ function renderHome() {
       ${(sync.user ? feed : mine).length ? (sync.user ? feed : mine).map(feedCard).join('') : `<p class="rm">${sync.user ? 'Finished rounds from you and the people you follow show up here.' : 'Finish a round and it shows up here.'}</p>`}
       ${socialLoading ? '<p class="rm">Loading…</p>' : ''}</div>`;
   const go = () => { location.hash = 'hole-' + (active ? (lastPlayedHole(active) || 1) : 1); };
+  if ($('hmGroup')) $('hmGroup').onclick = () => { const g = active && roundGame(active); if (g && g.players && g.players.length) shareGame(g.id); else openGroup(); };
+  if ($('hmGrpOpen')) $('hmGrpOpen').onclick = openGroup;
+  el.querySelectorAll('[data-join]').forEach(b => b.onclick = () => handleGameLink(b.dataset.join));
   if ($('hmPlay')) $('hmPlay').onclick = go; if ($('hmResume')) $('hmResume').onclick = go;
   if ($('hmIn')) $('hmIn').onclick = () => sync.signIn();
   if ($('hmFriends')) $('hmFriends').onclick = openFriends;
   el.querySelectorAll('[data-bm]').forEach(b => b.onclick = () => { boardMode = b.dataset.bm; renderHome(); });
   if (sync.user && Date.now() - social.loadedAt > 60e3 && !socialLoading) loadSocial();
+}
+
+/* ------------------------------------------------------------------ play together (group rounds) */
+// Every signed-in round gets a group. Friends who follow you see "on the course · Join" on Home,
+// or you send them a link (#game-<id>). Each player keeps their own scorecard; the group's scores
+// stream between phones (Supabase realtime, with a poll as backup).
+const LS_GAMES = 'yb-games-v1', LS_PENDGAME = 'yb-pending-game';
+let games = store.get(LS_GAMES, {});
+let gamesSetup = null;           // null = not checked yet, true = 005_games.sql is in, false = not set up
+let gameChan = null, ensuring = false;
+const gameLoading = {};
+const roundGame = r => r && r.game_id ? (games[r.game_id] || { id: r.game_id, players: [], scores: {} }) : null;
+const gameLink = gid => location.origin + location.pathname + '#game-' + gid;
+const fmtName = g => (g.format === 'match' ? 'Match play' : 'Stroke play') + ' · ' + (g.net === false ? 'gross' : 'net');
+const saveGames = () => {
+  // keep this device's cache small: the current group plus the last few
+  const ids = Object.keys(games).sort((a, b) => (games[b].at || 0) - (games[a].at || 0)).slice(0, 20);
+  const keep = {}; ids.forEach(id => keep[id] = games[id]); games = keep; store.set(LS_GAMES, games);
+};
+
+async function ensureGame(r) {
+  if (!r || r.game_id || !sync.user || gamesSetup !== true || ensuring || !navigator.onLine) return;
+  ensuring = true;
+  try {
+    const gid = uuid();
+    const { error } = await sync.client.from('games').insert({ id: gid, course: COURSE_ID, format: 'stroke', net: true });
+    if (error) throw error;
+    games[gid] = { id: gid, host: sync.user.id, format: 'stroke', net: true, status: 'active', players: [], scores: {}, at: Date.now() };
+    await attachRound(r, gid, true);
+  } catch (e) { console.warn('group', e); if (isSetupError(e)) gamesSetup = false; }
+  ensuring = false;
+}
+async function attachRound(r, gid, quiet) {
+  const { error } = await sync.client.rpc('join_game', { gid, rid: r.id, name: displayName(), tee: r.tee || null, hcp: courseHcp(r.tee) });
+  if (error) { if (!quiet) toast(/finished/i.test(error.message || '') ? 'That group round has finished' : "Couldn't join right now"); return false; }
+  r.game_id = gid; upsertRound(r);
+  subscribeGame(gid); await loadGame(gid, true); publishProfile(true);
+  return true;
+}
+async function leaveGameRow(gid) {
+  if (!sync.user || !gid) return;
+  await sync.client.from('game_players').delete().eq('game_id', gid).eq('user_id', sync.user.id);
+}
+async function loadGame(gid, quiet) {
+  if (!sync.user || !sync.client || !gid || gameLoading[gid]) return;
+  gameLoading[gid] = true;
+  try {
+    const c = sync.client;
+    const [g, gp] = await Promise.all([c.from('games').select('*').eq('id', gid).maybeSingle(), c.from('game_players').select('*').eq('game_id', gid).order('joined_at')]);
+    if (g.error || gp.error) { const e = g.error || gp.error; if (isSetupError(e)) gamesSetup = false; throw e; }
+    const rids = gp.data.filter(p => p.user_id !== sync.user.id && p.round_id).map(p => p.round_id);
+    const sc = rids.length ? await c.from('hole_scores').select('round_id,hole,score').in('round_id', rids) : { data: [] };
+    if (sc.error) throw sc.error;
+    const scores = {};
+    sc.data.forEach(s => { if (s.score != null) (scores[s.round_id] = scores[s.round_id] || {})[s.hole] = s.score; });
+    const prev = games[gid], a = activeRound();
+    // say hello when someone joins the group I'm playing in
+    if (!quiet && prev && prev.players && a && a.game_id === gid) {
+      const had = new Set(prev.players.map(p => p.user_id));
+      gp.data.filter(p => !had.has(p.user_id) && p.user_id !== sync.user.id).forEach(p => toast(`${firstName(p.display_name) || 'A friend'} joined your group`));
+    }
+    games[gid] = Object.assign({}, g.data || { id: gid }, { players: gp.data, scores, at: Date.now() });
+    saveGames();
+  } catch (e) { console.warn('group load', e); }
+  gameLoading[gid] = false;
+  renderMyCard(); renderBar(); renderHome();
+}
+let gameT = null;
+const loadGameSoon = gid => { clearTimeout(gameT); gameT = setTimeout(() => loadGame(gid), 400); };
+function subscribeGame(gid) {
+  if (!sync.client || !gid || (gameChan && gameChan.gid === gid)) return;
+  try {
+    if (gameChan) sync.client.removeChannel(gameChan.ch);
+    const ch = sync.client.channel('game-' + gid)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'game_players', filter: 'game_id=eq.' + gid }, () => loadGameSoon(gid))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'games', filter: 'id=eq.' + gid }, () => loadGameSoon(gid))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hole_scores' }, p => {
+        const rid = (p.new || p.old || {}).round_id, g = games[gid];
+        if (g && g.players && g.players.some(x => x.round_id === rid && x.user_id !== sync.user.id)) loadGameSoon(gid);
+      })
+      .subscribe();
+    gameChan = { gid, ch };
+  } catch (e) { console.warn('realtime', e); }
+}
+
+// everyone in the group with their scores; my own come straight from this phone
+function groupPlayers(g, r) {
+  const me = sync.user && sync.user.id;
+  const ps = (g.players || []).map(p => ({ id: p.user_id, me: p.user_id === me, name: p.display_name || 'Golfer', hcp: p.course_hcp, tee: p.tee, rid: p.round_id }));
+  if (!ps.some(p => p.me)) ps.unshift({ id: me, me: true, name: displayName(), hcp: courseHcp(r.tee), tee: r.tee, rid: r.id });
+  ps.forEach(p => {
+    p.sc = {};
+    if (p.me) { data.scores.filter(s => s.round_id === r.id && s.score != null).forEach(s => p.sc[s.hole] = s.score); if (p.hcp == null) p.hcp = courseHcp(r.tee); }
+    else Object.assign(p.sc, (g.scores || {})[p.rid] || {});
+  });
+  return ps;
+}
+const pName = p => p.me ? 'You' : firstName(p.name) || 'Golfer';
+function matchStatus(a, b, net) {
+  const H = YB.H, diff = net && a.hcp != null && b.hcp != null ? a.hcp - b.hcp : 0;  // the higher handicap gets the difference
+  let up = 0, n = 0;
+  const lead = () => up > 0 ? a : b;
+  const is = p => p.me ? "You're" : pName(p) + ' is';
+  for (let i = 1; i <= 18; i++) {
+    const sa = a.sc[i], sb = b.sc[i]; if (sa == null || sb == null) continue; n++;
+    const na = sa - (diff > 0 ? WHS.strokesOnHole(diff, H[i - 1].hcp) : 0), nb = sb - (diff < 0 ? WHS.strokesOnHole(-diff, H[i - 1].hcp) : 0);
+    if (na < nb) up++; else if (nb < na) up--;
+    const left = 18 - n;
+    if (Math.abs(up) > left) return `${pName(lead())} win${lead().me ? '' : 's'} ${Math.abs(up)}&${left}`;
+  }
+  if (!n) return 'Match play · all square';
+  if (n === 18) return up === 0 ? 'Match halved' : `${pName(lead())} win${lead().me ? '' : 's'} 1 up`;
+  return up === 0 ? `All square thru ${n}` : `${is(lead())} ${Math.abs(up)} up thru ${n}`;
+}
+function groupStandings(g, r) {
+  const ps = groupPlayers(g, r), net = g.net !== false, H = YB.H;
+  ps.forEach(p => {
+    let gross = 0, par = 0, k = 0, thru = 0;
+    for (let i = 1; i <= 18; i++) { const s = p.sc[i]; if (s == null) continue; gross += s; par += H[i - 1].par; thru++; if (net && p.hcp != null) k += WHS.strokesOnHole(p.hcp, H[i - 1].hcp); }
+    Object.assign(p, { gross, par, thru, val: gross - k - par });
+  });
+  const rows = ps.slice().sort((x, y) => (x.thru ? 0 : 1) - (y.thru ? 0 : 1) || x.val - y.val || y.thru - x.thru);
+  const match = g.format === 'match' && ps.length === 2 ? matchStatus(ps[0], ps[1], net) : '';
+  return { rows, ps, net, match };
+}
+function standingsHtml(r) {
+  const g = roundGame(r); if (!g) return '';
+  const st = groupStandings(g, r);
+  return `${st.match ? `<p class="gmatch">${esc(st.match)}</p>` : ''}<ol class="board">${st.rows.map((x, i) => `<li class="${x.me ? 'me' : ''}"><span class="rk">${x.thru ? i + 1 : ''}</span><span class="av">${esc(initials(x.me ? displayName() : x.name))}</span><span class="nm">${esc(x.me ? 'You' : x.name)}<small class="gsub">${x.thru ? `thru ${x.thru} · ${x.gross}` : 'not started'}${x.tee ? ' · ' + esc(x.tee) : ''}${st.net && x.hcp != null ? ' · CH ' + (x.hcp < 0 ? '+' + (-x.hcp) : x.hcp) : ''}</small></span><span class="val">${x.thru ? toParTxt(x.val) : '–'}</span></li>`).join('')}</ol>`;
+}
+// one line for the hole screen: "You E · Sam +2 · Alex +1"
+function groupStrip(r) {
+  const g = roundGame(r); if (!g || !g.players || g.players.length < 2) return '';
+  const st = groupStandings(g, r);
+  return `<div class="rgrp" id="rGrp" role="button" tabindex="0" aria-label="Group scores, open scorecard">${st.match ? `<span>${esc(st.match)}</span>` : st.rows.map(x => `<span>${esc(pName(x))} <b>${x.thru ? toParTxt(x.val) : '–'}</b>${x.thru ? `<small>${x.thru}</small>` : ''}</span>`).join('')}</div>`;
+}
+// everyone's card side by side on the Scorecard tab
+function groupCardHtml(r) {
+  const g = roundGame(r); if (!g || !g.players || g.players.length < 2) return '';
+  const H = YB.H, st = groupStandings(g, r);
+  const cls = (s, i) => { const d = s - H[i - 1].par; return d <= -2 ? 'e' : d === -1 ? 'b' : d >= 1 ? 'o' : ''; };
+  const sum = (p, a, b) => { let v = 0, any = false; for (let i = a; i <= b; i++) if (p.sc[i] != null) { v += p.sc[i]; any = true; } return any ? v : ''; };
+  const head = `<tr><th>Hole</th>${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => `<th>${i}</th>`).join('')}<th>Out</th>${[10, 11, 12, 13, 14, 15, 16, 17, 18].map(i => `<th>${i}</th>`).join('')}<th>In</th><th>Tot</th><th>${st.net ? 'Net' : '+/−'}</th></tr>`;
+  const parRow = `<tr class="sub"><td>Par</td>${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => `<td>${H[i - 1].par}</td>`).join('')}<td>36</td>${[10, 11, 12, 13, 14, 15, 16, 17, 18].map(i => `<td>${H[i - 1].par}</td>`).join('')}<td>36</td><td>72</td><td></td></tr>`;
+  const prow = p => { const c = i => `<td class="sv ${p.sc[i] != null ? cls(p.sc[i], i) : ''}">${p.sc[i] ?? '·'}</td>`, o = sum(p, 1, 9), n = sum(p, 10, 18);
+    return `<tr class="${p.me ? 'gme' : ''}"><td class="gn">${esc(pName(p))}</td>${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(c).join('')}<td><b>${o}</b></td>${[10, 11, 12, 13, 14, 15, 16, 17, 18].map(c).join('')}<td><b>${n}</b></td><td><b>${o === '' && n === '' ? '' : (+o || 0) + (+n || 0)}</b></td><td><b>${p.thru ? toParTxt(p.val) : ''}</b></td></tr>`; };
+  return `<h2 style="margin-top:16px">Group · ${esc(fmtName(g))}</h2>${st.match ? `<p class="gmatch">${esc(st.match)}</p>` : ''}
+    <div class="cardview"><table class="sc gcard">${head}${parRow}${st.ps.map(prow).join('')}</table></div>
+    <div class="rbtns"><button class="rb" id="gOpen">Group &amp; invite</button></div>`;
+}
+
+async function shareGame(gid) {
+  const url = gameLink(gid), text = `Join my round at The Crown on The Yardage Book`;
+  try { if (navigator.share) { await navigator.share({ title: 'The Yardage Book', text, url }); return; } } catch (e) { return; }
+  try { await navigator.clipboard.writeText(url); toast('Group link copied'); } catch (e) { prompt('Copy the group link', url); }
+}
+function openGroup() {
+  const r = activeRound() || viewRound();
+  if (!sync.user) { sync.signIn(); return; }
+  if (gamesSetup === false) { openSheet(`<h3>Play with friends</h3><p class="rm">Group rounds need one more database update (supabase/005_games.sql).</p>`); return; }
+  if (!r || r.status !== 'active') { openSheet(`<h3>Play with friends</h3><p class="rm">Start a round first. Friends can then join you from their Home screen, or you can send them a link.</p><div class="rbtns"><button class="rb main" id="gStart">Start round</button></div>`); $('gStart').onclick = async () => { closeSheet(); await startRound(); openGroup(); }; return; }
+  if (!r.game_id) { toast('Setting up your group…'); ensureGame(r).then(() => { if (activeRound() && activeRound().game_id) openGroup(); else toast("Couldn't set up the group. Check your connection."); }); return; }
+  const g = roundGame(r), host = g.host === sync.user.id, ps = groupPlayers(g, r);
+  openSheet(`<h3>Your group</h3>
+    <div class="frlist">${ps.map(p => `<div class="frrow"><span class="av">${esc(initials(p.me ? displayName() : p.name))}</span><span>${esc(p.me ? 'You' : p.name)}<small>${p.tee ? ' · ' + esc(p.tee) + ' tees' : ''}${p.hcp != null ? ' · CH ' + (p.hcp < 0 ? '+' + (-p.hcp) : p.hcp) : ''}</small></span><small>${p.id === g.host ? 'Host' : ''}</small></div>`).join('')}</div>
+    <div class="rbtns"><button class="rb main" id="gInvite">Invite a friend</button></div>
+    <p class="rm">Send the link by text, or friends who follow you can tap <b>Join</b> on their Home screen while you're playing. Everyone keeps score on their own phone.</p>
+    <div class="gset"><span>Game</span><div class="seg2"><button data-gf="stroke" aria-pressed="${g.format !== 'match'}" ${host ? '' : 'disabled'}>Stroke play</button><button data-gf="match" aria-pressed="${g.format === 'match'}" ${host ? '' : 'disabled'}>Match play</button></div></div>
+    <div class="gset"><span>Scoring</span><div class="seg2"><button data-gn="1" aria-pressed="${g.net !== false}" ${host ? '' : 'disabled'}>Net</button><button data-gn="0" aria-pressed="${g.net === false}" ${host ? '' : 'disabled'}>Gross</button></div></div>
+    <p class="rm">${g.format === 'match' && ps.length !== 2 ? 'Match play scores two players head to head. With more in the group it shows as stroke play. ' : ''}${host ? 'Net uses each player\'s course handicap; in match play the higher handicap gets the difference.' : 'The host sets the game.'}</p>
+    ${ps.length > 1 ? `<div class="rbtns"><button class="rb ghost" id="gLeave">Leave group</button></div>` : ''}`);
+  $('gInvite').onclick = () => shareGame(g.id);
+  const setGame = async patch => {
+    const { error } = await sync.client.from('games').update(Object.assign({ updated_at: nowIso() }, patch)).eq('id', g.id);
+    if (error) { toast("Couldn't change the game right now"); return; }
+    Object.assign(games[g.id] || g, patch); saveGames(); render(); openGroup();
+  };
+  document.querySelectorAll('[data-gf]').forEach(b => b.onclick = () => setGame({ format: b.dataset.gf }));
+  document.querySelectorAll('[data-gn]').forEach(b => b.onclick = () => setGame({ net: b.dataset.gn === '1' }));
+  if ($('gLeave')) $('gLeave').onclick = async () => {
+    closeSheet(); const old = r.game_id;
+    await leaveGameRow(old); r.game_id = null; upsertRound(r); delete games[old]; saveGames();
+    if (gameChan && gameChan.gid === old) { sync.client.removeChannel(gameChan.ch); gameChan = null; }
+    toast('You left the group'); render(); ensureGame(r);
+  };
+}
+// join a friend's group: from a link or the Join button on Home
+async function joinGame(gid, tee) {
+  const a = activeRound();
+  if (a) {
+    const old = a.game_id;
+    if (await attachRound(a, gid)) { if (old && old !== gid) leaveGameRow(old); toast('You joined the group'); location.hash = 'hole-' + (lastPlayedHole(a) || 1); render(); }
+    return;
+  }
+  if (tee && tee !== YB.tee()) { const b = document.querySelector(`#tees [data-t="${tee}"]`); if (b) b.click(); }
+  await startRound({ gameId: gid });
+}
+async function handleGameLink(direct) {
+  const m = location.hash.match(/^#game-([0-9a-f-]{36})$/);
+  const id = direct || (m ? m[1] : store.get(LS_PENDGAME, null));
+  if (!id) return;
+  if (m) { history.replaceState(null, '', location.pathname + '#home'); render(); }
+  if (!sync.user) {
+    store.set(LS_PENDGAME, id);
+    if (m || direct) { openSheet(`<h3>Join a group round</h3><p class="rm">Sign in to join your friends and see everyone's scores as you play.</p><div class="rbtns"><button class="rb main" id="gjIn">Sign in with Google</button></div>`); $('gjIn').onclick = () => sync.signIn(); }
+    return;
+  }
+  store.set(LS_PENDGAME, null);
+  const a = activeRound();
+  if (a && a.game_id === id) { location.hash = 'card'; return; }
+  const { data: pv, error } = await sync.client.rpc('game_preview', { gid: id });
+  if (error) { toast(isSetupError(error) ? 'Group rounds need database update 005_games.sql' : "Couldn't open that group"); return; }
+  if (!pv || !pv.open) { toast('That group round has finished'); return; }
+  const names = (pv.players || []).filter(Boolean), host = names[0] || 'your friend';
+  const tees = [...document.querySelectorAll('#tees [data-t]')].map(b => b.dataset.t);
+  const others = a && roundGame(a) && (roundGame(a).players || []).length > 1;
+  openSheet(`<h3>Join ${esc(firstName(host))}'s group?</h3>
+    <p class="rm">${names.length ? 'Playing: ' + names.map(esc).join(', ') + '<br>' : ''}${esc(fmtName(pv))}</p>
+    ${a ? `<p class="rm">Your round in progress${lastPlayedHole(a) ? ' (thru ' + lastPlayedHole(a) + ')' : ''} moves into this group.${others ? ' You\'ll leave your current group.' : ''}</p>`
+      : `<div class="aform"><label>Your tees<select id="gjTee">${tees.map(t => `<option ${t === YB.tee() ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label></div><p class="rm">This starts your round on hole 1.</p>`}
+    <div class="rbtns"><button class="rb main" id="gjYes">Join</button><button class="rb ghost" id="gjNo">Not now</button></div>`);
+  $('gjYes').onclick = () => { const t = $('gjTee') ? $('gjTee').value : null; closeSheet(); joinGame(id, t); };
+  $('gjNo').onclick = closeSheet;
+}
+// friends I follow who are playing right now, in a group I'm not in
+function liveFriends() {
+  const a = activeRound(), mine = a && a.game_id, g = mine && games[mine];
+  const inMine = new Set(g && g.players ? g.players.map(p => p.user_id) : []);
+  return social.following.map(f => social.profiles[f.followee]).filter(p => p && p.live_game && p.live_game !== mine && !inMine.has(p.user_id) && p.live_at && Date.now() - new Date(p.live_at).getTime() < 8 * 3600e3);
 }
 
 /* ------------------------------------------------------------------ sync (Supabase) */
@@ -1141,7 +1405,7 @@ const sync = {
     }
     await this.flush();
     await this.pull();
-    publishProfile(true); loadSocial().then(handleFollowLink); backfillFeed();
+    publishProfile(true); loadSocial().then(handleFollowLink).then(() => handleGameLink()); backfillFeed();
   },
   async pull() {
     if (!this.user) return;
@@ -1149,8 +1413,8 @@ const sync = {
       const c = this.client;
       const [r1, r2, r3, r4, r5] = await Promise.all([
         c.from('rounds').select('*').eq('course', COURSE_ID),
-        c.from('hole_scores').select('*'),
-        c.from('shots').select('*'),
+        c.from('hole_scores').select('*').eq('user_id', this.user.id),
+        c.from('shots').select('*').eq('user_id', this.user.id),
         c.from('profiles').select('*').maybeSingle(),
         c.from('posted_scores').select('*')
       ]);
@@ -1783,10 +2047,14 @@ function boot() {
     if (p.kind === 'ongreen') p.place([e, n], 'map'); else recordShot(p.club, [e, n], 'map');
     return true;
   };
-  window.addEventListener('hashchange', () => { if (/^#follow-/.test(location.hash)) { handleFollowLink(); return; } closeSheet(); render(); });
+  window.addEventListener('hashchange', () => { if (/^#follow-/.test(location.hash)) { handleFollowLink(); return; } if (/^#game-/.test(location.hash)) { handleGameLink(); return; } closeSheet(); render(); });
   if (activeRound()) startGPS();
   render();
-  sync.init().then(() => { if (!sync.user) handleFollowLink(); });
+  sync.init().then(() => { if (!sync.user) { handleFollowLink(); handleGameLink(); } });
+  // group scores: realtime does most of it; this catches anything missed (and works without realtime)
+  const pollGame = () => { const a = activeRound(); if (a && a.game_id && sync.user && document.visibilityState === 'visible') { subscribeGame(a.game_id); loadGame(a.game_id); } };
+  setInterval(pollGame, 25000);
+  document.addEventListener('visibilitychange', pollGame);
   // keep the GPS dot moving on the hole map
   setInterval(() => { if (activeRound() && gps.fix && !/^#card$/.test(location.hash)) YB.refresh2d(); }, 4000);
 }

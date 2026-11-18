@@ -1,5 +1,5 @@
 // Network first so updates show right away; cached copy when the signal drops on the course.
-const CACHE = 'yardage-202611151042';
+const CACHE = 'yardage-202611181904';
 const CORE = ['./', 'index.html', 'round.js', 'shell.js', 'handicap.js', 'importer.js', 'config.js', 'course.json', 'terrain.json', 'objects.json', 'ground.jpg', 'manifest.webmanifest'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)).catch(() => {})); self.skipWaiting(); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
